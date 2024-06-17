@@ -9,6 +9,12 @@ import pandas
 import boto3
 import pyarrow
 
+from process_report.invoices import (
+    lenovo_invoice,
+    nonbillable_invoice,
+    billable_invoice,
+)
+
 
 ### PI file field names
 PI_PI_FIELD = "PI"
@@ -64,33 +70,6 @@ def load_institute_map() -> dict:
     return institute_map
 
 
-def load_old_pis(old_pi_file) -> pandas.DataFrame:
-    try:
-        old_pi_df = pandas.read_csv(
-            old_pi_file,
-            dtype={
-                PI_INITIAL_CREDITS: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                PI_1ST_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                PI_2ND_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-            },
-        )
-    except FileNotFoundError:
-        sys.exit("Applying credit 0002 failed. Old PI file does not exist")
-
-    return old_pi_df
-
-
-def dump_old_pis(old_pi_file, old_pi_df: pandas.DataFrame):
-    old_pi_df = old_pi_df.astype(
-        {
-            PI_INITIAL_CREDITS: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-            PI_1ST_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-            PI_2ND_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-        },
-    )
-    old_pi_df.to_csv(old_pi_file, index=False)
-
-
 def load_alias(alias_file):
     alias_dict = dict()
 
@@ -104,31 +83,6 @@ def load_alias(alias_file):
         sys.exit(1)
 
     return alias_dict
-
-
-def get_pi_age(old_pi_df: pandas.DataFrame, pi, invoice_month):
-    """Returns time difference between current invoice month and PI's first invoice month
-    I.e 0 for new PIs
-
-    Will raise an error if the PI'a age is negative, which suggests a faulty invoice, or a program bug"""
-    first_invoice_month = old_pi_df.loc[old_pi_df[PI_PI_FIELD] == pi, PI_FIRST_MONTH]
-    if first_invoice_month.empty:
-        return 0
-
-    month_diff = get_month_diff(invoice_month, first_invoice_month.iat[0])
-    if month_diff < 0:
-        sys.exit(
-            f"PI {pi} from {first_invoice_month} found in {invoice_month} invoice!"
-        )
-    else:
-        return month_diff
-
-
-def get_month_diff(month_1, month_2):
-    """Returns a positive integer if month_1 is ahead in time of month_2"""
-    dt1 = datetime.datetime.strptime(month_1, "%Y-%m")
-    dt2 = datetime.datetime.strptime(month_2, "%Y-%m")
-    return (dt1.year - dt2.year) * 12 + (dt1.month - dt2.month)
 
 
 def get_invoice_bucket():
@@ -194,7 +148,7 @@ def main():
     parser.add_argument(
         "--nonbillable-file",
         required=False,
-        default="nonbillable.csv",
+        default="nonbillable",
         help="Name of nonbillable file",
     )
     parser.add_argument(
@@ -224,7 +178,7 @@ def main():
     parser.add_argument(
         "--Lenovo-file",
         required=False,
-        default="Lenovo.csv",
+        default="Lenovo",
         help="Name of output csv for Lenovo SU Types invoice",
     )
     parser.add_argument(
@@ -282,27 +236,46 @@ def main():
 
     merged_dataframe = validate_pi_aliases(merged_dataframe, alias_dict)
     merged_dataframe = add_institution(merged_dataframe)
-    export_lenovo(merged_dataframe, args.Lenovo_file)
-    remove_billables(merged_dataframe, pi, projects, args.nonbillable_file)
-
-    billable_projects = remove_non_billables(merged_dataframe, pi, projects)
-    billable_projects = validate_pi_names(billable_projects)
+    lenovo_inv = lenovo_invoice.LenovoInvoice(
+        name=args.Lenovo_file, invoice_month=invoice_month, data=merged_dataframe.copy()
+    )
+    nonbillable_inv = nonbillable_invoice.NonbillableInvoice(
+        name=args.nonbillable_file,
+        invoice_month=invoice_month,
+        data=merged_dataframe.copy(),
+        nonbillable_pis=pi,
+        nonbillable_projects=projects,
+    )
+    for invoice in [lenovo_inv, nonbillable_inv]:
+        invoice.process()
+        invoice.export()
+        if args.upload_to_s3:
+            bucket = get_invoice_bucket()
+            invoice.export_s3(bucket)
 
     if args.upload_to_s3:
         backup_to_s3_old_pi_file(old_pi_file)
-    credited_projects = apply_credits_new_pi(billable_projects, old_pi_file)
 
-    export_billables(credited_projects, args.output_file)
-    export_pi_billables(credited_projects, args.output_folder, invoice_month)
-    export_BU_only(billable_projects, args.BU_invoice_file, args.BU_subsidy_amount)
-    export_HU_BU(credited_projects, args.HU_BU_invoice_file)
+    billable_inv = billable_invoice.BillableInvoice(
+        name=args.nonbillable_file,
+        invoice_month=invoice_month,
+        data=merged_dataframe.copy(),
+        nonbillable_pis=pi,
+        nonbillable_projects=projects,
+        old_pi_filepath=old_pi_file,
+    )
+    billable_inv.process()
+    billable_inv.export()
+    if args.upload_to_s3:
+        bucket = get_invoice_bucket()
+        billable_inv.export_s3(bucket)
+
+    export_pi_billables(billable_inv.data, args.output_folder, invoice_month)
+    export_BU_only(billable_inv.data, args.BU_invoice_file, args.BU_subsidy_amount)
+    export_HU_BU(billable_inv.data, args.HU_BU_invoice_file)
 
     if args.upload_to_s3:
-        invoice_list = [
-            args.nonbillable_file,
-            args.output_file,
-            args.Lenovo_file,
-        ]
+        invoice_list = list()
 
         for pi_invoice in os.listdir(args.output_folder):
             invoice_list.append(os.path.join(args.output_folder, pi_invoice))
@@ -371,34 +344,6 @@ def timed_projects(timed_projects_file, invoice_date):
     return dataframe[mask]["Project"].to_list()
 
 
-def remove_non_billables(dataframe, pi, projects):
-    """Removes projects and PIs that should not be billed from the dataframe"""
-    filtered_dataframe = dataframe[
-        ~dataframe[PI_FIELD].isin(pi) & ~dataframe[PROJECT_FIELD].isin(projects)
-    ]
-    return filtered_dataframe
-
-
-def remove_billables(dataframe, pi, projects, output_file):
-    """Removes projects and PIs that should be billed from the dataframe
-
-    So this *keeps* the projects/pis that should not be billed.
-    """
-    filtered_dataframe = dataframe[
-        dataframe[PI_FIELD].isin(pi) | dataframe[PROJECT_FIELD].isin(projects)
-    ]
-    filtered_dataframe.to_csv(output_file, index=False)
-
-
-def validate_pi_names(dataframe):
-    invalid_pi_projects = dataframe[pandas.isna(dataframe[PI_FIELD])]
-    for i, row in invalid_pi_projects.iterrows():
-        print(f"Warning: Billable project {row[PROJECT_FIELD]} has empty PI field")
-    dataframe = dataframe[~pandas.isna(dataframe[PI_FIELD])]
-
-    return dataframe
-
-
 def validate_pi_aliases(dataframe: pandas.DataFrame, alias_dict: dict):
     for pi, pi_aliases in alias_dict.items():
         dataframe.loc[dataframe[PI_FIELD].isin(pi_aliases), PI_FIELD] = pi
@@ -411,87 +356,6 @@ def fetch_s3_alias_file():
     invoice_bucket = get_invoice_bucket()
     invoice_bucket.download_file(ALIAS_S3_FILEPATH, local_name)
     return local_name
-
-
-def apply_credits_new_pi(dataframe, old_pi_file):
-    new_pi_credit_code = "0002"
-    INITIAL_CREDIT_AMOUNT = 1000
-    EXCLUDE_SU_TYPES = ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"]
-
-    dataframe[CREDIT_FIELD] = None
-    dataframe[CREDIT_CODE_FIELD] = None
-    dataframe[BALANCE_FIELD] = Decimal(0)
-
-    old_pi_df = load_old_pis(old_pi_file)
-
-    current_pi_set = set(dataframe[PI_FIELD])
-    invoice_month = dataframe[INVOICE_DATE_FIELD].iat[0]
-    invoice_pis = old_pi_df[old_pi_df[PI_FIRST_MONTH] == invoice_month]
-    if invoice_pis[PI_INITIAL_CREDITS].empty or pandas.isna(
-        new_pi_credit_amount := invoice_pis[PI_INITIAL_CREDITS].iat[0]
-    ):
-        new_pi_credit_amount = INITIAL_CREDIT_AMOUNT
-
-    print(f"New PI Credit set at {new_pi_credit_amount} for {invoice_month}")
-
-    for pi in current_pi_set:
-        pi_projects = dataframe[dataframe[PI_FIELD] == pi]
-        pi_age = get_pi_age(old_pi_df, pi, invoice_month)
-        pi_old_pi_entry = old_pi_df.loc[old_pi_df[PI_PI_FIELD] == pi].squeeze()
-
-        if pi_age > 1:
-            for i, row in pi_projects.iterrows():
-                dataframe.at[i, BALANCE_FIELD] = row[COST_FIELD]
-        else:
-            if pi_age == 0:
-                if len(pi_old_pi_entry) == 0:
-                    pi_entry = [pi, invoice_month, new_pi_credit_amount, 0, 0]
-                    old_pi_df = pandas.concat(
-                        [
-                            pandas.DataFrame([pi_entry], columns=old_pi_df.columns),
-                            old_pi_df,
-                        ],
-                        ignore_index=True,
-                    )
-                    pi_old_pi_entry = old_pi_df.loc[
-                        old_pi_df[PI_PI_FIELD] == pi
-                    ].squeeze()
-
-                remaining_credit = new_pi_credit_amount
-                credit_used_field = PI_1ST_USED
-            elif pi_age == 1:
-                remaining_credit = (
-                    pi_old_pi_entry[PI_INITIAL_CREDITS] - pi_old_pi_entry[PI_1ST_USED]
-                )
-                credit_used_field = PI_2ND_USED
-
-            initial_credit = remaining_credit
-            for i, row in pi_projects.iterrows():
-                if remaining_credit == 0 or row[SU_TYPE_FIELD] in EXCLUDE_SU_TYPES:
-                    dataframe.at[i, BALANCE_FIELD] = row[COST_FIELD]
-                else:
-                    project_cost = row[COST_FIELD]
-                    applied_credit = min(project_cost, remaining_credit)
-
-                    dataframe.at[i, CREDIT_FIELD] = applied_credit
-                    dataframe.at[i, CREDIT_CODE_FIELD] = new_pi_credit_code
-                    dataframe.at[i, BALANCE_FIELD] = row[COST_FIELD] - applied_credit
-                    remaining_credit -= applied_credit
-
-            credits_used = initial_credit - remaining_credit
-            if (pi_old_pi_entry[credit_used_field] != 0) and (
-                credits_used != pi_old_pi_entry[credit_used_field]
-            ):
-                print(
-                    f"Warning: PI file overwritten. PI {pi} previously used ${pi_old_pi_entry[credit_used_field]} of New PI credits, now uses ${credits_used}"
-                )
-            old_pi_df.loc[
-                old_pi_df[PI_PI_FIELD] == pi, credit_used_field
-            ] = credits_used
-
-    dump_old_pis(old_pi_file, old_pi_df)
-
-    return dataframe
 
 
 def fetch_s3_old_pi_file():
@@ -620,26 +484,6 @@ def export_HU_BU(dataframe, output_file):
         | (dataframe[INSTITUTION_FIELD] == "Boston University")
     ]
     HU_BU_projects.to_csv(output_file)
-
-
-def export_lenovo(dataframe: pandas.DataFrame, output_file):
-    LENOVO_SU_TYPES = ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"]
-    SU_CHARGE_MULTIPLIER = 1
-
-    lenovo_df = dataframe[dataframe[SU_TYPE_FIELD].isin(LENOVO_SU_TYPES)][
-        [
-            INVOICE_DATE_FIELD,
-            PROJECT_FIELD,
-            INSTITUTION_FIELD,
-            SU_HOURS_FIELD,
-            SU_TYPE_FIELD,
-        ]
-    ].copy()
-
-    lenovo_df.rename(columns={SU_HOURS_FIELD: "SU Hours"}, inplace=True)
-    lenovo_df.insert(len(lenovo_df.columns), "SU Charge", SU_CHARGE_MULTIPLIER)
-    lenovo_df["Charge"] = lenovo_df["SU Hours"] * lenovo_df["SU Charge"]
-    lenovo_df.to_csv(output_file)
 
 
 def upload_to_s3(invoice_list: list, invoice_month):
