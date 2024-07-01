@@ -7,6 +7,7 @@ import math
 from textwrap import dedent
 
 from process_report import process_report
+from process_report.invoices import lenovo_invoice, nonbillable_invoice
 
 
 class TestGetInvoiceDate(TestCase):
@@ -73,6 +74,9 @@ class TestRemoveNonBillables(TestCase):
 
         self.pi_to_exclude = ["PI2", "PI3"]
         self.projects_to_exclude = ["ProjectB", "ProjectD"]
+        self.nonbillable_invoice = nonbillable_invoice.NonbillableInvoice(
+            "Foo", "Foo", self.dataframe, self.pi_to_exclude, self.projects_to_exclude
+        )
 
         self.output_file = tempfile.NamedTemporaryFile(delete=False)
         self.output_file2 = tempfile.NamedTemporaryFile(delete=False)
@@ -106,14 +110,8 @@ class TestRemoveNonBillables(TestCase):
         self.assertIn("ProjectE", result_df["Project - Allocation"].tolist())
 
     def test_remove_billables(self):
-        process_report.remove_billables(
-            self.dataframe,
-            self.pi_to_exclude,
-            self.projects_to_exclude,
-            self.output_file2.name,
-        )
-
-        result_df = pandas.read_csv(self.output_file2.name)
+        self.nonbillable_invoice.process()
+        result_df = self.nonbillable_invoice.data
 
         self.assertIn("PI2", result_df["Manager (PI)"].tolist())
         self.assertIn("PI3", result_df["Manager (PI)"].tolist())
@@ -752,18 +750,13 @@ class TestExportLenovo(TestCase):
                 "OpenStack GPUK80",
             ],
         }
-        self.dataframe = pandas.DataFrame(data)
+        self.lenovo_invoice = lenovo_invoice.LenovoInvoice(
+            "Lenovo", "2023-01", pandas.DataFrame(data)
+        )
+        self.lenovo_invoice.process()
 
-        output_file = tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".csv")
-        self.output_file = output_file.name
-
-    def tearDown(self):
-        os.remove(self.output_file)
-
-    def test_apply_credit_0002(self):
-        process_report.export_lenovo(self.dataframe, self.output_file)
-        output_df = pandas.read_csv(self.output_file)
-
+    def test_process_lenovo(self):
+        output_df = self.lenovo_invoice.data
         self.assertTrue(
             set(
                 [
