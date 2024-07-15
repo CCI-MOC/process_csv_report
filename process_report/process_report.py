@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import datetime
+import functools
 from decimal import Decimal
 
 import json
@@ -13,6 +14,7 @@ from process_report.invoices import (
     lenovo_invoice,
     nonbillable_invoice,
     billable_invoice,
+    hu_bu_invoice,
 )
 
 
@@ -85,6 +87,7 @@ def load_alias(alias_file):
     return alias_dict
 
 
+@functools.lru_cache
 def get_invoice_bucket():
     try:
         s3_resource = boto3.resource(
@@ -172,7 +175,7 @@ def main():
     parser.add_argument(
         "--HU-BU-invoice-file",
         required=False,
-        default="HU_BU.csv",
+        default="HU_BU",
         help="Name of output csv for HU and BU invoice",
     )
     parser.add_argument(
@@ -266,13 +269,22 @@ def main():
     )
     billable_inv.process()
     billable_inv.export()
+
+    hu_bu_inv = hu_bu_invoice.HUBUInvoice(
+        name=args.HU_BU_invoice_file,
+        invoice_month=invoice_month,
+        data=billable_inv.data,
+    )
+    hu_bu_inv.process()
+    hu_bu_inv.export()
+
     if args.upload_to_s3:
-        bucket = get_invoice_bucket()
-        billable_inv.export_s3(bucket)
+        for invoice in [billable_inv, hu_bu_inv]:
+            bucket = get_invoice_bucket()
+            invoice.export_s3(bucket)
 
     export_pi_billables(billable_inv.data, args.output_folder, invoice_month)
     export_BU_only(billable_inv.data, args.BU_invoice_file, args.BU_subsidy_amount)
-    export_HU_BU(billable_inv.data, args.HU_BU_invoice_file)
 
     if args.upload_to_s3:
         invoice_list = list()
@@ -281,7 +293,6 @@ def main():
             invoice_list.append(os.path.join(args.output_folder, pi_invoice))
 
         upload_to_s3(invoice_list, invoice_month)
-        upload_to_s3_HU_BU(args.HU_BU_invoice_file, invoice_month)
         upload_to_s3_old_pi_file(old_pi_file)
 
 
@@ -478,14 +489,6 @@ def _apply_subsidy(dataframe, subsidy_amount):
     return dataframe
 
 
-def export_HU_BU(dataframe, output_file):
-    HU_BU_projects = dataframe[
-        (dataframe[INSTITUTION_FIELD] == "Harvard University")
-        | (dataframe[INSTITUTION_FIELD] == "Boston University")
-    ]
-    HU_BU_projects.to_csv(output_file)
-
-
 def upload_to_s3(invoice_list: list, invoice_month):
     invoice_bucket = get_invoice_bucket()
     for invoice_filename in invoice_list:
@@ -496,18 +499,6 @@ def upload_to_s3(invoice_list: list, invoice_month):
         invoice_s3_path_archive = f"Invoices/{invoice_month}/Archive/{striped_filename} {invoice_month} {get_iso8601_time()}.csv"
         invoice_bucket.upload_file(invoice_filename, invoice_s3_path)
         invoice_bucket.upload_file(invoice_filename, invoice_s3_path_archive)
-
-
-def upload_to_s3_HU_BU(invoice_filename, invoice_month):
-    invoice_bucket = get_invoice_bucket()
-    invoice_bucket.upload_file(
-        invoice_filename,
-        f"Invoices/{invoice_month}/NERC-{invoice_month}-Total-Invoice.csv",
-    )
-    invoice_bucket.upload_file(
-        invoice_filename,
-        f"Invoices/{invoice_month}/Archive/NERC-{invoice_month}-Total-Invoice {get_iso8601_time()}.csv",
-    )
 
 
 if __name__ == "__main__":
