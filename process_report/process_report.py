@@ -13,6 +13,7 @@ from process_report.invoices import (
     lenovo_invoice,
     nonbillable_invoice,
     billable_invoice,
+    pi_specific_invoice,
 )
 
 
@@ -270,17 +271,18 @@ def main():
         bucket = get_invoice_bucket()
         billable_inv.export_s3(bucket)
 
-    export_pi_billables(billable_inv.data, args.output_folder, invoice_month)
+    pi_inv = pi_specific_invoice.PIInvoice(
+        name=args.output_folder, invoice_month=invoice_month, data=billable_inv.data
+    )
+    pi_inv.export()
+    if args.upload_to_s3:
+        bucket = get_invoice_bucket()
+        pi_inv.export_s3(bucket)
+
     export_BU_only(billable_inv.data, args.BU_invoice_file, args.BU_subsidy_amount)
     export_HU_BU(billable_inv.data, args.HU_BU_invoice_file)
 
     if args.upload_to_s3:
-        invoice_list = list()
-
-        for pi_invoice in os.listdir(args.output_folder):
-            invoice_list.append(os.path.join(args.output_folder, pi_invoice))
-
-        upload_to_s3(invoice_list, invoice_month)
         upload_to_s3_HU_BU(args.HU_BU_invoice_file, invoice_month)
         upload_to_s3_old_pi_file(old_pi_file)
 
@@ -405,22 +407,6 @@ def export_billables(dataframe, output_file):
     dataframe.to_csv(output_file, index=False)
 
 
-def export_pi_billables(dataframe: pandas.DataFrame, output_folder, invoice_month):
-    if not os.path.exists(output_folder):
-        os.mkdir(output_folder)
-
-    pi_list = dataframe[PI_FIELD].unique()
-
-    for pi in pi_list:
-        if pandas.isna(pi):
-            continue
-        pi_projects = dataframe[dataframe[PI_FIELD] == pi]
-        pi_instituition = pi_projects[INSTITUTION_FIELD].iat[0]
-        pi_projects.to_csv(
-            output_folder + f"/{pi_instituition}_{pi}_{invoice_month}.csv"
-        )
-
-
 def export_BU_only(dataframe: pandas.DataFrame, output_file, subsidy_amount):
     def get_project(row):
         project_alloc = row[PROJECT_FIELD]
@@ -484,18 +470,6 @@ def export_HU_BU(dataframe, output_file):
         | (dataframe[INSTITUTION_FIELD] == "Boston University")
     ]
     HU_BU_projects.to_csv(output_file)
-
-
-def upload_to_s3(invoice_list: list, invoice_month):
-    invoice_bucket = get_invoice_bucket()
-    for invoice_filename in invoice_list:
-        striped_filename = os.path.splitext(invoice_filename)[0]
-        invoice_s3_path = (
-            f"Invoices/{invoice_month}/{striped_filename} {invoice_month}.csv"
-        )
-        invoice_s3_path_archive = f"Invoices/{invoice_month}/Archive/{striped_filename} {invoice_month} {get_iso8601_time()}.csv"
-        invoice_bucket.upload_file(invoice_filename, invoice_s3_path)
-        invoice_bucket.upload_file(invoice_filename, invoice_s3_path_archive)
 
 
 def upload_to_s3_HU_BU(invoice_filename, invoice_month):

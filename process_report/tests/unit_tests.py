@@ -1,4 +1,4 @@
-from unittest import TestCase, mock
+from unittest import TestCase
 import tempfile
 import pandas
 import pyarrow
@@ -182,12 +182,13 @@ class TestExportPICSV(TestCase):
 
     def test_export_pi(self):
         output_dir = tempfile.TemporaryDirectory()
-        process_report.export_pi_billables(
-            self.dataframe, output_dir.name, self.invoice_month
+        pi_inv = test_utils.new_pi_specific_invoice(
+            output_dir.name, invoice_month=self.invoice_month, data=self.dataframe
         )
-
-        pi_csv_1 = f'{self.dataframe["Institution"][0]}_{self.dataframe["Manager (PI)"][0]}_{self.dataframe["Invoice Month"][0]}.csv'
-        pi_csv_2 = f'{self.dataframe["Institution"][3]}_{self.dataframe["Manager (PI)"][3]}_{self.dataframe["Invoice Month"][3]}.csv'
+        pi_inv.process()
+        pi_inv.export()
+        pi_csv_1 = f'{self.dataframe["Institution"][0]}_{self.dataframe["Manager (PI)"][0]} {self.dataframe["Invoice Month"][0]}.csv'
+        pi_csv_2 = f'{self.dataframe["Institution"][3]}_{self.dataframe["Manager (PI)"][3]} {self.dataframe["Invoice Month"][3]}.csv'
         self.assertIn(pi_csv_1, os.listdir(output_dir.name))
         self.assertIn(pi_csv_2, os.listdir(output_dir.name))
         self.assertEqual(
@@ -772,36 +773,3 @@ class TestExportLenovo(TestCase):
                 ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"],
             )
             self.assertEqual(row["Charge"], row["SU Charge"] * row["SU Hours"])
-
-
-class TestUploadToS3(TestCase):
-    @mock.patch("process_report.process_report.get_invoice_bucket")
-    @mock.patch("process_report.process_report.get_iso8601_time")
-    def test_remove_prefix(self, mock_get_time, mock_get_bucket):
-        mock_bucket = mock.MagicMock()
-        mock_get_bucket.return_value = mock_bucket
-        mock_get_time.return_value = "0"
-
-        invoice_month = "2024-03"
-        filenames = ["test.csv", "test2.test.csv", "test3"]
-        answers = [
-            ("test.csv", f"Invoices/{invoice_month}/test {invoice_month}.csv"),
-            (
-                "test.csv",
-                f"Invoices/{invoice_month}/Archive/test {invoice_month} 0.csv",
-            ),
-            (
-                "test2.test.csv",
-                f"Invoices/{invoice_month}/test2.test {invoice_month}.csv",
-            ),
-            (
-                "test2.test.csv",
-                f"Invoices/{invoice_month}/Archive/test2.test {invoice_month} 0.csv",
-            ),
-            ("test3", f"Invoices/{invoice_month}/test3 {invoice_month}.csv"),
-            ("test3", f"Invoices/{invoice_month}/Archive/test3 {invoice_month} 0.csv"),
-        ]
-
-        process_report.upload_to_s3(filenames, invoice_month)
-        for i, call_args in enumerate(mock_bucket.upload_file.call_args_list):
-            self.assertTrue(answers[i] in call_args)
