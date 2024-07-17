@@ -1,13 +1,15 @@
-from unittest import TestCase, mock
+from unittest import TestCase
 import tempfile
 import pandas
 import pyarrow
 import os
+import uuid
 import math
 from textwrap import dedent
 
-from process_report import process_report
+from process_report import process_report, util
 from process_report.invoices import lenovo_invoice, nonbillable_invoice
+from process_report.tests import util as test_utils
 
 
 class TestGetInvoiceDate(TestCase):
@@ -85,30 +87,6 @@ class TestRemoveNonBillables(TestCase):
         os.remove(self.output_file.name)
         os.remove(self.output_file2.name)
 
-    def test_remove_non_billables(self):
-        billables_df = process_report.remove_non_billables(
-            self.dataframe, self.pi_to_exclude, self.projects_to_exclude
-        )
-        process_report.export_billables(billables_df, self.output_file.name)
-
-        result_df = pandas.read_csv(self.output_file.name)
-
-        self.assertNotIn("PI2", result_df["Manager (PI)"].tolist())
-        self.assertNotIn("PI3", result_df["Manager (PI)"].tolist())
-        self.assertNotIn(
-            "PI4", result_df["Manager (PI)"].tolist()
-        )  # indirect because ProjectD was removed
-        self.assertNotIn("ProjectB", result_df["Project - Allocation"].tolist())
-        self.assertNotIn(
-            "ProjectC", result_df["Project - Allocation"].tolist()
-        )  # indirect because PI3 was removed
-        self.assertNotIn("ProjectD", result_df["Project - Allocation"].tolist())
-
-        self.assertIn("PI1", result_df["Manager (PI)"].tolist())
-        self.assertIn("PI5", result_df["Manager (PI)"].tolist())
-        self.assertIn("ProjectA", result_df["Project - Allocation"].tolist())
-        self.assertIn("ProjectE", result_df["Project - Allocation"].tolist())
-
     def test_remove_billables(self):
         self.nonbillable_invoice.process()
         result_df = self.nonbillable_invoice.data
@@ -124,6 +102,26 @@ class TestRemoveNonBillables(TestCase):
         self.assertNotIn("PI5", result_df["Manager (PI)"].tolist())
         self.assertNotIn("ProjectA", result_df["Project - Allocation"].tolist())
         self.assertNotIn("ProjectE", result_df["Project - Allocation"].tolist())
+
+
+class TestBillableInvoice(TestCase):
+    def test_remove_nonbillables(self):
+        pis = [uuid.uuid4().hex for x in range(10)]
+        projects = [uuid.uuid4().hex for x in range(10)]
+        nonbillable_pis = pis[:3]
+        nonbillable_projects = projects[7:]
+        billable_pis = pis[3:7]
+        data = pandas.DataFrame({"Manager (PI)": pis, "Project - Allocation": projects})
+
+        test_invoice = test_utils.new_billable_invoice()
+        data = test_invoice._remove_nonbillables(
+            data, nonbillable_pis, nonbillable_projects
+        )
+        self.assertTrue(data[data["Manager (PI)"].isin(nonbillable_pis)].empty)
+        self.assertTrue(
+            data[data["Project - Allocation"].isin(nonbillable_projects)].empty
+        )
+        self.assertTrue(data.equals(data[data["Manager (PI)"].isin(billable_pis)]))
 
 
 class TestMergeCSV(TestCase):
@@ -184,12 +182,13 @@ class TestExportPICSV(TestCase):
 
     def test_export_pi(self):
         output_dir = tempfile.TemporaryDirectory()
-        process_report.export_pi_billables(
-            self.dataframe, output_dir.name, self.invoice_month
+        pi_inv = test_utils.new_pi_specific_invoice(
+            output_dir.name, invoice_month=self.invoice_month, data=self.dataframe
         )
-
-        pi_csv_1 = f'{self.dataframe["Institution"][0]}_{self.dataframe["Manager (PI)"][0]}_{self.dataframe["Invoice Month"][0]}.csv'
-        pi_csv_2 = f'{self.dataframe["Institution"][3]}_{self.dataframe["Manager (PI)"][3]}_{self.dataframe["Invoice Month"][3]}.csv'
+        pi_inv.process()
+        pi_inv.export()
+        pi_csv_1 = f'{self.dataframe["Institution"][0]}_{self.dataframe["Manager (PI)"][0]} {self.dataframe["Invoice Month"][0]}.csv'
+        pi_csv_2 = f'{self.dataframe["Institution"][3]}_{self.dataframe["Manager (PI)"][3]} {self.dataframe["Invoice Month"][3]}.csv'
         self.assertIn(pi_csv_1, os.listdir(output_dir.name))
         self.assertIn(pi_csv_2, os.listdir(output_dir.name))
         self.assertEqual(
@@ -285,9 +284,9 @@ class TestMonthUtils(TestCase):
             (("2024-12", "2025-03"), -3),
         ]
         for arglist, answer in testcases:
-            self.assertEqual(process_report.get_month_diff(*arglist), answer)
+            self.assertEqual(util.get_month_diff(*arglist), answer)
         with self.assertRaises(ValueError):
-            process_report.get_month_diff("2024-16", "2025-03")
+            util.get_month_diff("2024-16", "2025-03")
 
 
 class TestCredit0002(TestCase):
@@ -551,26 +550,21 @@ class TestCredit0002(TestCase):
         os.remove(self.old_pi_no_gpu_file)
 
     def test_apply_credit_0002(self):
-        dataframe = process_report.apply_credits_new_pi(
-            self.dataframe, self.old_pi_file
+        test_invoice = test_utils.new_billable_invoice()
+        old_pi_df = test_invoice._load_old_pis(self.old_pi_file)
+        dataframe, updated_old_pi_df = test_invoice._apply_credits_new_pi(
+            self.dataframe, old_pi_df
         )
         dataframe = dataframe.astype({"Credit": "float64", "Balance": "int64"})
+        updated_old_pi_df = updated_old_pi_df.sort_values(by="PI", ignore_index=True)
         self.assertTrue(self.answer_dataframe.equals(dataframe))
-
-        old_pi_df_output = pandas.read_csv(
-            self.old_pi_file,
-            dtype={
-                "Initial Credits": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                "1st Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                "2nd Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-            },
-        ).sort_values(by=["PI"], ignore_index=True)
-
-        self.assertTrue(old_pi_df_output.equals(self.old_pi_df_answer))
+        self.assertTrue(self.old_pi_df_answer.equals(updated_old_pi_df))
 
     def test_no_gpu(self):
-        dataframe = process_report.apply_credits_new_pi(
-            self.dataframe_no_gpu, self.old_pi_no_gpu_file
+        test_invoice = test_utils.new_billable_invoice()
+        old_pi_df = test_invoice._load_old_pis(self.old_pi_no_gpu_file)
+        dataframe, _ = test_invoice._apply_credits_new_pi(
+            self.dataframe_no_gpu, old_pi_df
         )
         dataframe = dataframe.astype({"Credit": "float64", "Balance": "float64"})
         self.assertTrue(self.no_gpu_df_answer.equals(dataframe))
@@ -580,8 +574,9 @@ class TestCredit0002(TestCase):
             {"PI": ["PI1"], "First Invoice Month": ["2024-04"]}
         )
         invoice_month = "2024-03"
+        test_invoice = test_utils.new_billable_invoice()
         with self.assertRaises(SystemExit):
-            process_report.get_pi_age(old_pi_df, "PI1", invoice_month)
+            test_invoice._get_pi_age(old_pi_df, "PI1", invoice_month)
 
 
 class TestBUSubsidy(TestCase):
@@ -714,7 +709,8 @@ class TestValidateBillables(TestCase):
         self.assertEqual(
             1, len(self.dataframe[pandas.isna(self.dataframe["Manager (PI)"])])
         )
-        validated_df = process_report.validate_pi_names(self.dataframe)
+        test_invoice = test_utils.new_billable_invoice()
+        validated_df = test_invoice._validate_pi_names(self.dataframe)
         self.assertEqual(
             0, len(validated_df[pandas.isna(validated_df["Manager (PI)"])])
         )
@@ -777,36 +773,3 @@ class TestExportLenovo(TestCase):
                 ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"],
             )
             self.assertEqual(row["Charge"], row["SU Charge"] * row["SU Hours"])
-
-
-class TestUploadToS3(TestCase):
-    @mock.patch("process_report.process_report.get_invoice_bucket")
-    @mock.patch("process_report.process_report.get_iso8601_time")
-    def test_remove_prefix(self, mock_get_time, mock_get_bucket):
-        mock_bucket = mock.MagicMock()
-        mock_get_bucket.return_value = mock_bucket
-        mock_get_time.return_value = "0"
-
-        invoice_month = "2024-03"
-        filenames = ["test.csv", "test2.test.csv", "test3"]
-        answers = [
-            ("test.csv", f"Invoices/{invoice_month}/test {invoice_month}.csv"),
-            (
-                "test.csv",
-                f"Invoices/{invoice_month}/Archive/test {invoice_month} 0.csv",
-            ),
-            (
-                "test2.test.csv",
-                f"Invoices/{invoice_month}/test2.test {invoice_month}.csv",
-            ),
-            (
-                "test2.test.csv",
-                f"Invoices/{invoice_month}/Archive/test2.test {invoice_month} 0.csv",
-            ),
-            ("test3", f"Invoices/{invoice_month}/test3 {invoice_month}.csv"),
-            ("test3", f"Invoices/{invoice_month}/Archive/test3 {invoice_month} 0.csv"),
-        ]
-
-        process_report.upload_to_s3(filenames, invoice_month)
-        for i, call_args in enumerate(mock_bucket.upload_file.call_args_list):
-            self.assertTrue(answers[i] in call_args)
