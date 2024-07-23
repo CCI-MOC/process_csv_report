@@ -16,6 +16,10 @@ logging.basicConfig(level=logging.INFO)
 
 @dataclass
 class BillableInvoice(invoice.Invoice):
+    NEW_PI_CREDIT_CODE = "0002"
+    INITIAL_CREDIT_AMOUNT = 1000
+    EXCLUDE_SU_TYPES = ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"]
+
     nonbillable_pis: list[str]
     nonbillable_projects: list[str]
     old_pi_filepath: str
@@ -25,11 +29,27 @@ class BillableInvoice(invoice.Invoice):
             self.data, self.nonbillable_pis, self.nonbillable_projects
         )
         self.data = self._validate_pi_names(self.data)
+        self.data[invoice.CREDIT_FIELD] = None
+        self.data[invoice.CREDIT_CODE_FIELD] = None
+        self.data[invoice.BALANCE_FIELD] = Decimal(0)
+        self.old_pi_df = self._load_old_pis(self.old_pi_filepath)
 
     def _process(self):
-        old_pi_df = self._load_old_pis(self.old_pi_filepath)
-        self.data, updated_old_pi_df = self._apply_credits_new_pi(self.data, old_pi_df)
-        self._dump_old_pis(self.old_pi_filepath, updated_old_pi_df)
+        self.data, self.updated_old_pi_df = self._apply_credits_new_pi(
+            self.data, self.old_pi_df
+        )
+
+    def _prepare_export(self):
+        self.updated_old_pi_df = self.updated_old_pi_df.astype(
+            {
+                invoice.PI_INITIAL_CREDITS: pandas.ArrowDtype(
+                    pyarrow.decimal128(21, 2)
+                ),
+                invoice.PI_1ST_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
+                invoice.PI_2ND_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
+            },
+        )
+        self._dump_old_pis(self.old_pi_filepath, self.updated_old_pi_df)
 
     def _remove_nonbillables(
         self,
@@ -70,27 +90,18 @@ class BillableInvoice(invoice.Invoice):
     def _apply_credits_new_pi(
         self, data: pandas.DataFrame, old_pi_df: pandas.DataFrame
     ):
-        new_pi_credit_code = "0002"
-        INITIAL_CREDIT_AMOUNT = 1000
-        EXCLUDE_SU_TYPES = ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"]
-
-        data[invoice.CREDIT_FIELD] = None
-        data[invoice.CREDIT_CODE_FIELD] = None
-        data[invoice.BALANCE_FIELD] = Decimal(0)
-
         current_pi_set = set(data[invoice.PI_FIELD])
-        invoice_month = data[invoice.INVOICE_DATE_FIELD].iat[0]
-        invoice_pis = old_pi_df[old_pi_df[invoice.PI_FIRST_MONTH] == invoice_month]
+        invoice_pis = old_pi_df[old_pi_df[invoice.PI_FIRST_MONTH] == self.invoice_month]
         if invoice_pis[invoice.PI_INITIAL_CREDITS].empty or pandas.isna(
             new_pi_credit_amount := invoice_pis[invoice.PI_INITIAL_CREDITS].iat[0]
         ):
-            new_pi_credit_amount = INITIAL_CREDIT_AMOUNT
+            new_pi_credit_amount = self.INITIAL_CREDIT_AMOUNT
 
-        print(f"New PI Credit set at {new_pi_credit_amount} for {invoice_month}")
+        print(f"New PI Credit set at {new_pi_credit_amount} for {self.invoice_month}")
 
         for pi in current_pi_set:
             pi_projects = data[data[invoice.PI_FIELD] == pi]
-            pi_age = self._get_pi_age(old_pi_df, pi, invoice_month)
+            pi_age = self._get_pi_age(old_pi_df, pi, self.invoice_month)
             pi_old_pi_entry = old_pi_df.loc[
                 old_pi_df[invoice.PI_PI_FIELD] == pi
             ].squeeze()
@@ -101,7 +112,7 @@ class BillableInvoice(invoice.Invoice):
             else:
                 if pi_age == 0:
                     if len(pi_old_pi_entry) == 0:
-                        pi_entry = [pi, invoice_month, new_pi_credit_amount, 0, 0]
+                        pi_entry = [pi, self.invoice_month, new_pi_credit_amount, 0, 0]
                         old_pi_df = pandas.concat(
                             [
                                 pandas.DataFrame([pi_entry], columns=old_pi_df.columns),
@@ -126,7 +137,7 @@ class BillableInvoice(invoice.Invoice):
                 for i, row in pi_projects.iterrows():
                     if (
                         remaining_credit == 0
-                        or row[invoice.SU_TYPE_FIELD] in EXCLUDE_SU_TYPES
+                        or row[invoice.SU_TYPE_FIELD] in self.EXCLUDE_SU_TYPES
                     ):
                         data.at[i, invoice.BALANCE_FIELD] = row[invoice.COST_FIELD]
                     else:
@@ -134,7 +145,7 @@ class BillableInvoice(invoice.Invoice):
                         applied_credit = min(project_cost, remaining_credit)
 
                         data.at[i, invoice.CREDIT_FIELD] = applied_credit
-                        data.at[i, invoice.CREDIT_CODE_FIELD] = new_pi_credit_code
+                        data.at[i, invoice.CREDIT_CODE_FIELD] = self.NEW_PI_CREDIT_CODE
                         data.at[i, invoice.BALANCE_FIELD] = (
                             row[invoice.COST_FIELD] - applied_credit
                         )
@@ -151,16 +162,6 @@ class BillableInvoice(invoice.Invoice):
                     old_pi_df[invoice.PI_PI_FIELD] == pi, credit_used_field
                 ] = credits_used
 
-        old_pi_df = old_pi_df.astype(
-            {
-                invoice.PI_INITIAL_CREDITS: pandas.ArrowDtype(
-                    pyarrow.decimal128(21, 2)
-                ),
-                invoice.PI_1ST_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                invoice.PI_2ND_USED: pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-            },
-        )
-
         return (data, old_pi_df)
 
     def _dump_old_pis(self, old_pi_filepath, old_pi_df: pandas.DataFrame):
@@ -169,7 +170,6 @@ class BillableInvoice(invoice.Invoice):
     def _get_pi_age(self, old_pi_df: pandas.DataFrame, pi, invoice_month):
         """Returns time difference between current invoice month and PI's first invoice month
         I.e 0 for new PIs
-
         Will raise an error if the PI'a age is negative, which suggests a faulty invoice, or a program bug"""
         first_invoice_month = old_pi_df.loc[
             old_pi_df[invoice.PI_PI_FIELD] == pi, invoice.PI_FIRST_MONTH
