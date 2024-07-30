@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from decimal import Decimal
 import logging
 import sys
 
@@ -7,6 +6,7 @@ import pandas
 import pyarrow
 
 import process_report.invoices.invoice as invoice
+import process_report.invoices.discount_invoice as discount_invoice
 import process_report.util as util
 
 
@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 @dataclass
-class BillableInvoice(invoice.Invoice):
+class BillableInvoice(discount_invoice.DiscountInvoice):
     NEW_PI_CREDIT_CODE = "0002"
     INITIAL_CREDIT_AMOUNT = 1000
     EXCLUDE_SU_TYPES = ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"]
@@ -31,7 +31,7 @@ class BillableInvoice(invoice.Invoice):
         self.data = self._validate_pi_names(self.data)
         self.data[invoice.CREDIT_FIELD] = None
         self.data[invoice.CREDIT_CODE_FIELD] = None
-        self.data[invoice.BALANCE_FIELD] = Decimal(0)
+        self.data[invoice.BALANCE_FIELD] = self.data[invoice.COST_FIELD]
         self.old_pi_df = self._load_old_pis(self.old_pi_filepath)
 
     def _process(self):
@@ -100,7 +100,10 @@ class BillableInvoice(invoice.Invoice):
         print(f"New PI Credit set at {new_pi_credit_amount} for {self.invoice_month}")
 
         for pi in current_pi_set:
-            pi_projects = data[data[invoice.PI_FIELD] == pi]
+            pi_projects = data[
+                (data[invoice.PI_FIELD] == pi)
+                & ~(data[invoice.SU_TYPE_FIELD].isin(self.EXCLUDE_SU_TYPES))
+            ]
             pi_age = self._get_pi_age(old_pi_df, pi, self.invoice_month)
             pi_old_pi_entry = old_pi_df.loc[
                 old_pi_df[invoice.PI_PI_FIELD] == pi
@@ -133,25 +136,16 @@ class BillableInvoice(invoice.Invoice):
                     )
                     credit_used_field = invoice.PI_2ND_USED
 
-                initial_credit = remaining_credit
-                for i, row in pi_projects.iterrows():
-                    if (
-                        remaining_credit == 0
-                        or row[invoice.SU_TYPE_FIELD] in self.EXCLUDE_SU_TYPES
-                    ):
-                        data.at[i, invoice.BALANCE_FIELD] = row[invoice.COST_FIELD]
-                    else:
-                        project_cost = row[invoice.COST_FIELD]
-                        applied_credit = min(project_cost, remaining_credit)
+                credits_used = self.apply_flat_discount(
+                    data,
+                    pi_projects,
+                    remaining_credit,
+                    invoice.CREDIT_FIELD,
+                    invoice.BALANCE_FIELD,
+                    invoice.CREDIT_CODE_FIELD,
+                    self.NEW_PI_CREDIT_CODE,
+                )
 
-                        data.at[i, invoice.CREDIT_FIELD] = applied_credit
-                        data.at[i, invoice.CREDIT_CODE_FIELD] = self.NEW_PI_CREDIT_CODE
-                        data.at[i, invoice.BALANCE_FIELD] = (
-                            row[invoice.COST_FIELD] - applied_credit
-                        )
-                        remaining_credit -= applied_credit
-
-                credits_used = initial_credit - remaining_credit
                 if (pi_old_pi_entry[credit_used_field] != 0) and (
                     credits_used != pi_old_pi_entry[credit_used_field]
                 ):

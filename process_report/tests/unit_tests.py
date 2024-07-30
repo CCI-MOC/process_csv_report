@@ -4,7 +4,6 @@ import pandas
 import os
 import uuid
 import math
-from decimal import Decimal
 from textwrap import dedent
 
 from process_report import process_report, util
@@ -418,7 +417,7 @@ class TestCredit0002(TestCase):
         self.dataframe = pandas.DataFrame(data)
         self.dataframe["Credit"] = None
         self.dataframe["Credit Code"] = None
-        self.dataframe["Balance"] = Decimal(0)
+        self.dataframe["Balance"] = self.dataframe["Cost"]
         self.answer_dataframe = pandas.DataFrame(answer_df_dict)
         old_pi = [
             "PI,First Invoice Month,Initial Credits,1st Month Used,2nd Month Used",
@@ -515,7 +514,7 @@ class TestCredit0002(TestCase):
         )
         self.dataframe_no_gpu["Credit"] = None
         self.dataframe_no_gpu["Credit Code"] = None
-        self.dataframe_no_gpu["Balance"] = Decimal(0)
+        self.dataframe_no_gpu["Balance"] = self.dataframe_no_gpu["Cost"]
         old_pi_no_gpu = [
             "PI,First Invoice Month,Initial Credits,1st Month Used,2nd Month Used",
             "OldPI,2024-03,500,200,0",

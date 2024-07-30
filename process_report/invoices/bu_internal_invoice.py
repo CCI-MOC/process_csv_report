@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 import process_report.invoices.invoice as invoice
+import process_report.invoices.discount_invoice as discount_invoice
 
 
 @dataclass
-class BUInternalInvoice(invoice.Invoice):
+class BUInternalInvoice(discount_invoice.DiscountInvoice):
     subsidy_amount: int
 
     def _prepare(self):
@@ -34,35 +35,36 @@ class BUInternalInvoice(invoice.Invoice):
         ]
 
     def _process(self):
-        project_list = self.data["Project"].unique()
-        data_no_dup = self.data.drop_duplicates("Project", inplace=False)
+        data_summed_projects = self._sum_project_allocations(self.data)
+        self.data = self._apply_subsidy(data_summed_projects, self.subsidy_amount)
+
+    def _sum_project_allocations(self, dataframe):
+        """A project may have multiple allocations, and therefore multiple rows
+        in the raw invoices. For BU-Internal invoice, we only want 1 row for
+        each unique project, summing up its allocations' costs"""
+        project_list = dataframe["Project"].unique()
+        data_no_dup = dataframe.drop_duplicates("Project", inplace=False)
         sum_fields = [invoice.COST_FIELD, invoice.CREDIT_FIELD, invoice.BALANCE_FIELD]
         for project in project_list:
-            project_mask = self.data["Project"] == project
+            project_mask = dataframe["Project"] == project
             no_dup_project_mask = data_no_dup["Project"] == project
 
-            sum_fields_sums = self.data[project_mask][sum_fields].sum().values
+            sum_fields_sums = dataframe[project_mask][sum_fields].sum().values
             data_no_dup.loc[no_dup_project_mask, sum_fields] = sum_fields_sums
 
-        self.data = self._apply_subsidy(data_no_dup, self.subsidy_amount)
+        return data_no_dup
 
     def _apply_subsidy(self, dataframe, subsidy_amount):
         pi_list = dataframe[invoice.PI_FIELD].unique()
 
         for pi in pi_list:
             pi_projects = dataframe[dataframe[invoice.PI_FIELD] == pi]
-            remaining_subsidy = subsidy_amount
-            for i, row in pi_projects.iterrows():
-                project_remaining_cost = row[invoice.BALANCE_FIELD]
-                applied_subsidy = min(project_remaining_cost, remaining_subsidy)
-
-                dataframe.at[i, invoice.SUBSIDY_FIELD] = applied_subsidy
-                dataframe.at[i, invoice.BALANCE_FIELD] = (
-                    row[invoice.BALANCE_FIELD] - applied_subsidy
-                )
-                remaining_subsidy -= applied_subsidy
-
-                if remaining_subsidy == 0:
-                    break
+            self.apply_flat_discount(
+                dataframe,
+                pi_projects,
+                subsidy_amount,
+                invoice.SUBSIDY_FIELD,
+                invoice.BALANCE_FIELD,
+            )
 
         return dataframe
