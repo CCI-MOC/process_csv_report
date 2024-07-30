@@ -641,13 +641,14 @@ class TestBUSubsidy(TestCase):
             ],  # Test case where subsidy does/doesn't cover fully balance
         }
         self.dataframe = pandas.DataFrame(data)
-        output_file = tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".csv")
-        self.output_file = output_file.name
         self.subsidy = 100
 
     def test_apply_BU_subsidy(self):
-        process_report.export_BU_only(self.dataframe, self.output_file, self.subsidy)
-        output_df = pandas.read_csv(self.output_file)
+        test_invoice = test_utils.new_bu_internal_invoice(
+            data=self.dataframe, subsidy_amount=self.subsidy
+        )
+        test_invoice.process()
+        output_df = test_invoice.data.reset_index()
 
         self.assertTrue(
             set(
