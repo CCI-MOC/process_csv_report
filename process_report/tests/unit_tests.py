@@ -1,13 +1,14 @@
 from unittest import TestCase, mock
 import tempfile
 import pandas
-import pyarrow
 import os
+import uuid
 import math
 from textwrap import dedent
 
-from process_report import process_report
+from process_report import process_report, util
 from process_report.invoices import lenovo_invoice, nonbillable_invoice
+from process_report.tests import util as test_utils
 
 
 class TestGetInvoiceDate(TestCase):
@@ -85,30 +86,6 @@ class TestRemoveNonBillables(TestCase):
         os.remove(self.output_file.name)
         os.remove(self.output_file2.name)
 
-    def test_remove_non_billables(self):
-        billables_df = process_report.remove_non_billables(
-            self.dataframe, self.pi_to_exclude, self.projects_to_exclude
-        )
-        process_report.export_billables(billables_df, self.output_file.name)
-
-        result_df = pandas.read_csv(self.output_file.name)
-
-        self.assertNotIn("PI2", result_df["Manager (PI)"].tolist())
-        self.assertNotIn("PI3", result_df["Manager (PI)"].tolist())
-        self.assertNotIn(
-            "PI4", result_df["Manager (PI)"].tolist()
-        )  # indirect because ProjectD was removed
-        self.assertNotIn("ProjectB", result_df["Project - Allocation"].tolist())
-        self.assertNotIn(
-            "ProjectC", result_df["Project - Allocation"].tolist()
-        )  # indirect because PI3 was removed
-        self.assertNotIn("ProjectD", result_df["Project - Allocation"].tolist())
-
-        self.assertIn("PI1", result_df["Manager (PI)"].tolist())
-        self.assertIn("PI5", result_df["Manager (PI)"].tolist())
-        self.assertIn("ProjectA", result_df["Project - Allocation"].tolist())
-        self.assertIn("ProjectE", result_df["Project - Allocation"].tolist())
-
     def test_remove_billables(self):
         self.nonbillable_invoice.process()
         result_df = self.nonbillable_invoice.data
@@ -124,6 +101,26 @@ class TestRemoveNonBillables(TestCase):
         self.assertNotIn("PI5", result_df["Manager (PI)"].tolist())
         self.assertNotIn("ProjectA", result_df["Project - Allocation"].tolist())
         self.assertNotIn("ProjectE", result_df["Project - Allocation"].tolist())
+
+
+class TestBillableInvoice(TestCase):
+    def test_remove_nonbillables(self):
+        pis = [uuid.uuid4().hex for x in range(10)]
+        projects = [uuid.uuid4().hex for x in range(10)]
+        nonbillable_pis = pis[:3]
+        nonbillable_projects = projects[7:]
+        billable_pis = pis[3:7]
+        data = pandas.DataFrame({"Manager (PI)": pis, "Project - Allocation": projects})
+
+        test_invoice = test_utils.new_billable_invoice()
+        data = test_invoice._remove_nonbillables(
+            data, nonbillable_pis, nonbillable_projects
+        )
+        self.assertTrue(data[data["Manager (PI)"].isin(nonbillable_pis)].empty)
+        self.assertTrue(
+            data[data["Project - Allocation"].isin(nonbillable_projects)].empty
+        )
+        self.assertTrue(data.equals(data[data["Manager (PI)"].isin(billable_pis)]))
 
 
 class TestMergeCSV(TestCase):
@@ -285,9 +282,9 @@ class TestMonthUtils(TestCase):
             (("2024-12", "2025-03"), -3),
         ]
         for arglist, answer in testcases:
-            self.assertEqual(process_report.get_month_diff(*arglist), answer)
+            self.assertEqual(util.get_month_diff(*arglist), answer)
         with self.assertRaises(ValueError):
-            process_report.get_month_diff("2024-16", "2025-03")
+            util.get_month_diff("2024-16", "2025-03")
 
 
 class TestCredit0002(TestCase):
@@ -418,6 +415,9 @@ class TestCredit0002(TestCase):
             "Balance": [10, 100, 10000, 400, 100, 0, 0, 0, 0, 200, 700],
         }
         self.dataframe = pandas.DataFrame(data)
+        self.dataframe["Credit"] = None
+        self.dataframe["Credit Code"] = None
+        self.dataframe["Balance"] = self.dataframe["Cost"]
         self.answer_dataframe = pandas.DataFrame(answer_df_dict)
         old_pi = [
             "PI,First Invoice Month,Initial Credits,1st Month Used,2nd Month Used",
@@ -475,9 +475,9 @@ class TestCredit0002(TestCase):
             )
             .astype(
                 {
-                    "Initial Credits": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                    "1st Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                    "2nd Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
+                    "Initial Credits": object,
+                    "1st Month Used": object,
+                    "2nd Month Used": object,
                 },
             )
             .sort_values(by="PI", ignore_index=True)
@@ -512,6 +512,9 @@ class TestCredit0002(TestCase):
                 "Cost": [500, 100, 100, 500, 500],
             }
         )
+        self.dataframe_no_gpu["Credit"] = None
+        self.dataframe_no_gpu["Credit Code"] = None
+        self.dataframe_no_gpu["Balance"] = self.dataframe_no_gpu["Cost"]
         old_pi_no_gpu = [
             "PI,First Invoice Month,Initial Credits,1st Month Used,2nd Month Used",
             "OldPI,2024-03,500,200,0",
@@ -551,26 +554,21 @@ class TestCredit0002(TestCase):
         os.remove(self.old_pi_no_gpu_file)
 
     def test_apply_credit_0002(self):
-        dataframe = process_report.apply_credits_new_pi(
-            self.dataframe, self.old_pi_file
+        test_invoice = test_utils.new_billable_invoice(invoice_month="2024-03")
+        old_pi_df = test_invoice._load_old_pis(self.old_pi_file)
+        dataframe, updated_old_pi_df = test_invoice._apply_credits_new_pi(
+            self.dataframe, old_pi_df
         )
         dataframe = dataframe.astype({"Credit": "float64", "Balance": "int64"})
+        updated_old_pi_df = updated_old_pi_df.sort_values(by="PI", ignore_index=True)
         self.assertTrue(self.answer_dataframe.equals(dataframe))
-
-        old_pi_df_output = pandas.read_csv(
-            self.old_pi_file,
-            dtype={
-                "Initial Credits": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                "1st Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                "2nd Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-            },
-        ).sort_values(by=["PI"], ignore_index=True)
-
-        self.assertTrue(old_pi_df_output.equals(self.old_pi_df_answer))
+        self.assertTrue(self.old_pi_df_answer.equals(updated_old_pi_df))
 
     def test_no_gpu(self):
-        dataframe = process_report.apply_credits_new_pi(
-            self.dataframe_no_gpu, self.old_pi_no_gpu_file
+        test_invoice = test_utils.new_billable_invoice(invoice_month="2024-03")
+        old_pi_df = test_invoice._load_old_pis(self.old_pi_no_gpu_file)
+        dataframe, _ = test_invoice._apply_credits_new_pi(
+            self.dataframe_no_gpu, old_pi_df
         )
         dataframe = dataframe.astype({"Credit": "float64", "Balance": "float64"})
         self.assertTrue(self.no_gpu_df_answer.equals(dataframe))
@@ -580,8 +578,9 @@ class TestCredit0002(TestCase):
             {"PI": ["PI1"], "First Invoice Month": ["2024-04"]}
         )
         invoice_month = "2024-03"
+        test_invoice = test_utils.new_billable_invoice()
         with self.assertRaises(SystemExit):
-            process_report.get_pi_age(old_pi_df, "PI1", invoice_month)
+            test_invoice._get_pi_age(old_pi_df, "PI1", invoice_month)
 
 
 class TestBUSubsidy(TestCase):
@@ -641,13 +640,14 @@ class TestBUSubsidy(TestCase):
             ],  # Test case where subsidy does/doesn't cover fully balance
         }
         self.dataframe = pandas.DataFrame(data)
-        output_file = tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".csv")
-        self.output_file = output_file.name
         self.subsidy = 100
 
     def test_apply_BU_subsidy(self):
-        process_report.export_BU_only(self.dataframe, self.output_file, self.subsidy)
-        output_df = pandas.read_csv(self.output_file)
+        test_invoice = test_utils.new_bu_internal_invoice(
+            data=self.dataframe, subsidy_amount=self.subsidy
+        )
+        test_invoice.process()
+        output_df = test_invoice.data.reset_index()
 
         self.assertTrue(
             set(
@@ -714,7 +714,8 @@ class TestValidateBillables(TestCase):
         self.assertEqual(
             1, len(self.dataframe[pandas.isna(self.dataframe["Manager (PI)"])])
         )
-        validated_df = process_report.validate_pi_names(self.dataframe)
+        test_invoice = test_utils.new_billable_invoice()
+        validated_df = test_invoice._validate_pi_names(self.dataframe)
         self.assertEqual(
             0, len(validated_df[pandas.isna(validated_df["Manager (PI)"])])
         )
