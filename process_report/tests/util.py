@@ -10,6 +10,8 @@ from process_report.invoices import (
 from process_report.processors import (
     add_institution_processor,
     validate_pi_alias_processor,
+    remove_nonbillables_processor,
+    validate_billable_pi_processor,
 )
 
 
@@ -25,16 +27,12 @@ def new_billable_invoice(
     name="",
     invoice_month="0000-00",
     data=pandas.DataFrame(),
-    nonbillable_pis=[],
-    nonbillable_projects=[],
     old_pi_filepath="",
 ):
     return billable_invoice.BillableInvoice(
         name,
         invoice_month,
         data,
-        nonbillable_pis,
-        nonbillable_projects,
         old_pi_filepath,
     )
 
@@ -72,4 +70,24 @@ def new_validate_pi_alias_processor(
 ):
     return validate_pi_alias_processor.ValidatePIAliasProcessor(
         name, invoice_month, data, alias_map
+    )
+
+
+def new_remove_nonbillables_processor(
+    name="",
+    invoice_month="0000-00",
+    data=pandas.DataFrame(),
+    nonbillable_pis=[],
+    nonbillable_projects=[],
+):
+    return remove_nonbillables_processor.RemoveNonbillables(
+        name, invoice_month, data, nonbillable_pis, nonbillable_projects
+    )
+
+
+def new_validate_billable_pi_processor(
+    name="", invoice_month="0000-00", data=pandas.DataFrame()
+):
+    return validate_billable_pi_processor.ValidateBillablePIsProcessor(
+        name, invoice_month, data
     )

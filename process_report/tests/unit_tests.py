@@ -104,26 +104,6 @@ class TestRemoveNonBillables(TestCase):
         self.assertNotIn("ProjectE", result_df["Project - Allocation"].tolist())
 
 
-class TestBillableInvoice(TestCase):
-    def test_remove_nonbillables(self):
-        pis = [uuid.uuid4().hex for x in range(10)]
-        projects = [uuid.uuid4().hex for x in range(10)]
-        nonbillable_pis = pis[:3]
-        nonbillable_projects = projects[7:]
-        billable_pis = pis[3:7]
-        data = pandas.DataFrame({"Manager (PI)": pis, "Project - Allocation": projects})
-
-        test_invoice = test_utils.new_billable_invoice()
-        data = test_invoice._remove_nonbillables(
-            data, nonbillable_pis, nonbillable_projects
-        )
-        self.assertTrue(data[data["Manager (PI)"].isin(nonbillable_pis)].empty)
-        self.assertTrue(
-            data[data["Project - Allocation"].isin(nonbillable_projects)].empty
-        )
-        self.assertTrue(data.equals(data[data["Manager (PI)"].isin(billable_pis)]))
-
-
 class TestMergeCSV(TestCase):
     def setUp(self):
         self.header = ["ID", "Name", "Age"]
@@ -276,6 +256,46 @@ class TestValidateAliasProcessor(TestCase):
         )
         validate_pi_alias_proc.process()
         self.assertTrue(answer_data.equals(validate_pi_alias_proc.data))
+
+
+class TestRemoveNonbillablesProcessor(TestCase):
+    def test_remove_nonbillables(self):
+        pis = [uuid.uuid4().hex for x in range(10)]
+        projects = [uuid.uuid4().hex for x in range(10)]
+        nonbillable_pis = pis[:3]
+        nonbillable_projects = projects[7:]
+        billable_pis = pis[3:7]
+        data = pandas.DataFrame({"Manager (PI)": pis, "Project - Allocation": projects})
+
+        remove_nonbillables_proc = test_utils.new_remove_nonbillables_processor()
+        data = remove_nonbillables_proc._remove_nonbillables(
+            data, nonbillable_pis, nonbillable_projects
+        )
+        self.assertTrue(data[data["Manager (PI)"].isin(nonbillable_pis)].empty)
+        self.assertTrue(
+            data[data["Project - Allocation"].isin(nonbillable_projects)].empty
+        )
+        self.assertTrue(data.equals(data[data["Manager (PI)"].isin(billable_pis)]))
+
+
+class TestValidateBillablePIProcessor(TestCase):
+    def test_validate_billables(self):
+        test_data = pandas.DataFrame(
+            {
+                "Manager (PI)": ["PI1", math.nan, "PI1", "PI2", "PI2"],
+                "Project - Allocation": [
+                    "ProjectA",
+                    "ProjectB",
+                    "ProjectC",
+                    "ProjectD",
+                    "ProjectE",
+                ],
+            }
+        )
+        self.assertEqual(1, len(test_data[pandas.isna(test_data["Manager (PI)"])]))
+        validate_billable_pi_proc = test_utils.new_validate_billable_pi_processor()
+        output_data = validate_billable_pi_proc._validate_pi_names(test_data)
+        self.assertEqual(0, len(output_data[pandas.isna(output_data["Manager (PI)"])]))
 
 
 class TestMonthUtils(TestCase):
@@ -705,31 +725,6 @@ class TestBUSubsidy(TestCase):
         self.assertEqual(0, output_df.loc[1, "Balance"])
         self.assertEqual(0, output_df.loc[2, "Balance"])
         self.assertEqual(50, output_df.loc[3, "Balance"])
-
-
-class TestValidateBillables(TestCase):
-    def setUp(self):
-        data = {
-            "Manager (PI)": ["PI1", math.nan, "PI1", "PI2", "PI2"],
-            "Project - Allocation": [
-                "ProjectA",
-                "ProjectB",
-                "ProjectC",
-                "ProjectD",
-                "ProjectE",
-            ],
-        }
-        self.dataframe = pandas.DataFrame(data)
-
-    def test_validate_billables(self):
-        self.assertEqual(
-            1, len(self.dataframe[pandas.isna(self.dataframe["Manager (PI)"])])
-        )
-        test_invoice = test_utils.new_billable_invoice()
-        validated_df = test_invoice._validate_pi_names(self.dataframe)
-        self.assertEqual(
-            0, len(validated_df[pandas.isna(validated_df["Manager (PI)"])])
-        )
 
 
 class TestExportLenovo(TestCase):

@@ -17,6 +17,8 @@ from process_report.invoices import (
 from process_report.processors import (
     validate_pi_alias_processor,
     add_institution_processor,
+    remove_nonbillables_processor,
+    validate_billable_pi_processor,
 )
 
 ### PI file field names
@@ -227,15 +229,29 @@ def main():
         nonbillable_projects=projects,
     )
 
+    ### Remove nonbillables
+
+    remove_nonbillables_proc = remove_nonbillables_processor.RemoveNonbillables(
+        "", invoice_month, add_institute_proc.data, pi, projects
+    )
+    remove_nonbillables_proc.process()
+
+    validate_billable_pi_proc = (
+        validate_billable_pi_processor.ValidateBillablePIsProcessor(
+            "", invoice_month, remove_nonbillables_proc.data
+        )
+    )
+    validate_billable_pi_proc.process()
+
+    ### Initialize invoices
+
     if args.upload_to_s3:
         backup_to_s3_old_pi_file(old_pi_file)
 
     billable_inv = billable_invoice.BillableInvoice(
         name=args.output_file,
         invoice_month=invoice_month,
-        data=add_institute_proc.data.copy(),
-        nonbillable_pis=pi,
-        nonbillable_projects=projects,
+        data=validate_billable_pi_proc.data.copy(),
         old_pi_filepath=old_pi_file,
     )
 
