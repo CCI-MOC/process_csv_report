@@ -17,6 +17,7 @@ from process_report.invoices import (
 from process_report.processors import (
     validate_pi_alias_processor,
     add_institution_processor,
+    lenovo_processor,
 )
 
 ### PI file field names
@@ -214,10 +215,15 @@ def main():
     )
     add_institute_proc.process()
 
+    lenovo_proc = lenovo_processor.LenovoProcessor(
+        "", invoice_month, add_institute_proc.data
+    )
+    lenovo_proc.process()
+
     ### Finish preliminary processing
 
     lenovo_inv = lenovo_invoice.LenovoInvoice(
-        name=args.Lenovo_file, invoice_month=invoice_month, data=add_institute_proc.data
+        name=args.Lenovo_file, invoice_month=invoice_month, data=lenovo_proc.data
     )
     nonbillable_inv = nonbillable_invoice.NonbillableInvoice(
         name=args.nonbillable_file,
