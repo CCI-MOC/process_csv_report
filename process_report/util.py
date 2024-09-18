@@ -1,6 +1,5 @@
 import os
 import datetime
-import json
 import logging
 import functools
 
@@ -25,23 +24,6 @@ def get_invoice_bucket():
     except KeyError:
         print("Error: Please set the environment variables S3_KEY_ID and S3_APP_KEY")
     return s3_resource.Bucket(os.environ.get("S3_BUCKET_NAME", "nerc-invoicing"))
-
-
-def get_institution_from_pi(institute_map, pi_uname):
-    institution_key = pi_uname.split("@")[-1]
-    institution_name = institute_map.get(institution_key, "")
-
-    if institution_name == "":
-        logger.warn(f"PI name {pi_uname} does not match any institution!")
-
-    return institution_name
-
-
-def load_institute_map() -> dict:
-    with open("process_report/institute_map.json", "r") as f:
-        institute_map = json.load(f)
-
-    return institute_map
 
 
 def get_iso8601_time():
