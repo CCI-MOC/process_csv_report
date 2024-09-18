@@ -222,7 +222,7 @@ class TestExportPICSV(TestCase):
         self.assertNotIn("ProjectC", pi_df["Project - Allocation"].tolist())
 
 
-class TestGetInstitute(TestCase):
+class TestAddInstituteProcessor(TestCase):
     def test_get_pi_institution(self):
         institute_map = {
             "harvard.edu": "Harvard University",
@@ -251,31 +251,34 @@ class TestGetInstitute(TestCase):
             "g@bidmc.harvard.edu": "Beth Israel Deaconess Medical Center",
         }
 
+        add_institute_proc = test_utils.new_add_institution_processor()
+
         for pi_email, answer in answers.items():
             self.assertEqual(
-                util.get_institution_from_pi(institute_map, pi_email), answer
+                add_institute_proc._get_institution_from_pi(institute_map, pi_email),
+                answer,
             )
 
 
-class TestAlias(TestCase):
-    def setUp(self):
-        self.alias_dict = {"PI1": ["PI1_1", "PI1_2"], "PI2": ["PI2_1"]}
-
-        self.data = pandas.DataFrame(
+class TestValidateAliasProcessor(TestCase):
+    def test_validate_alias(self):
+        alias_map = {"PI1": ["PI1_1", "PI1_2"], "PI2": ["PI2_1"]}
+        test_data = pandas.DataFrame(
             {
                 "Manager (PI)": ["PI1", "PI1_1", "PI1_2", "PI2_1", "PI2_1"],
             }
         )
-
-        self.answer = pandas.DataFrame(
+        answer_data = pandas.DataFrame(
             {
                 "Manager (PI)": ["PI1", "PI1", "PI1", "PI2", "PI2"],
             }
         )
 
-    def test_validate_alias(self):
-        output = process_report.validate_pi_aliases(self.data, self.alias_dict)
-        self.assertTrue(self.answer.equals(output))
+        validate_pi_alias_proc = test_utils.new_validate_pi_alias_processor(
+            data=test_data, alias_map=alias_map
+        )
+        validate_pi_alias_proc.process()
+        self.assertTrue(answer_data.equals(validate_pi_alias_proc.data))
 
 
 class TestMonthUtils(TestCase):

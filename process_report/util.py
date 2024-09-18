@@ -27,28 +27,6 @@ def get_invoice_bucket():
     return s3_resource.Bucket(os.environ.get("S3_BUCKET_NAME", "nerc-invoicing"))
 
 
-def get_institute_mapping(institute_list: list):
-    institute_map = dict()
-    for institute_info in institute_list:
-        for domain in institute_info["domains"]:
-            institute_map[domain] = institute_info["display_name"]
-
-    return institute_map
-
-
-def get_institution_from_pi(institute_map, pi_uname):
-    institution_domain = pi_uname.split("@")[-1]
-    for i in range(institution_domain.count(".") + 1):
-        if institution_name := institute_map.get(institution_domain, ""):
-            break
-        institution_domain = institution_domain[institution_domain.find(".") + 1 :]
-
-    if institution_name == "":
-        logger.warn(f"PI name {pi_uname} does not match any institution!")
-
-    return institution_name
-
-
 def load_institute_list():
     with open("process_report/institute_list.yaml", "r") as f:
         institute_list = yaml.safe_load(f)
