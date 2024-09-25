@@ -104,26 +104,6 @@ class TestRemoveNonBillables(TestCase):
         self.assertNotIn("ProjectE", result_df["Project - Allocation"].tolist())
 
 
-class TestBillableInvoice(TestCase):
-    def test_remove_nonbillables(self):
-        pis = [uuid.uuid4().hex for x in range(10)]
-        projects = [uuid.uuid4().hex for x in range(10)]
-        nonbillable_pis = pis[:3]
-        nonbillable_projects = projects[7:]
-        billable_pis = pis[3:7]
-        data = pandas.DataFrame({"Manager (PI)": pis, "Project - Allocation": projects})
-
-        test_invoice = test_utils.new_billable_invoice()
-        data = test_invoice._remove_nonbillables(
-            data, nonbillable_pis, nonbillable_projects
-        )
-        self.assertTrue(data[data["Manager (PI)"].isin(nonbillable_pis)].empty)
-        self.assertTrue(
-            data[data["Project - Allocation"].isin(nonbillable_projects)].empty
-        )
-        self.assertTrue(data.equals(data[data["Manager (PI)"].isin(billable_pis)]))
-
-
 class TestMergeCSV(TestCase):
     def setUp(self):
         self.header = ["ID", "Name", "Age"]
@@ -219,7 +199,7 @@ class TestExportPICSV(TestCase):
         self.assertNotIn("ProjectC", pi_df["Project - Allocation"].tolist())
 
 
-class TestGetInstitute(TestCase):
+class TestAddInstituteProcessor(TestCase):
     def test_get_pi_institution(self):
         institute_map = {
             "harvard.edu": "Harvard University",
@@ -248,31 +228,74 @@ class TestGetInstitute(TestCase):
             "g@bidmc.harvard.edu": "Beth Israel Deaconess Medical Center",
         }
 
+        add_institute_proc = test_utils.new_add_institution_processor()
+
         for pi_email, answer in answers.items():
             self.assertEqual(
-                process_report.get_institution_from_pi(institute_map, pi_email), answer
+                add_institute_proc._get_institution_from_pi(institute_map, pi_email),
+                answer,
             )
 
 
-class TestAlias(TestCase):
-    def setUp(self):
-        self.alias_dict = {"PI1": ["PI1_1", "PI1_2"], "PI2": ["PI2_1"]}
-
-        self.data = pandas.DataFrame(
+class TestValidateAliasProcessor(TestCase):
+    def test_validate_alias(self):
+        alias_map = {"PI1": ["PI1_1", "PI1_2"], "PI2": ["PI2_1"]}
+        test_data = pandas.DataFrame(
             {
                 "Manager (PI)": ["PI1", "PI1_1", "PI1_2", "PI2_1", "PI2_1"],
             }
         )
-
-        self.answer = pandas.DataFrame(
+        answer_data = pandas.DataFrame(
             {
                 "Manager (PI)": ["PI1", "PI1", "PI1", "PI2", "PI2"],
             }
         )
 
-    def test_validate_alias(self):
-        output = process_report.validate_pi_aliases(self.data, self.alias_dict)
-        self.assertTrue(self.answer.equals(output))
+        validate_pi_alias_proc = test_utils.new_validate_pi_alias_processor(
+            data=test_data, alias_map=alias_map
+        )
+        validate_pi_alias_proc.process()
+        self.assertTrue(answer_data.equals(validate_pi_alias_proc.data))
+
+
+class TestRemoveNonbillablesProcessor(TestCase):
+    def test_remove_nonbillables(self):
+        pis = [uuid.uuid4().hex for x in range(10)]
+        projects = [uuid.uuid4().hex for x in range(10)]
+        nonbillable_pis = pis[:3]
+        nonbillable_projects = projects[7:]
+        billable_pis = pis[3:7]
+        data = pandas.DataFrame({"Manager (PI)": pis, "Project - Allocation": projects})
+
+        remove_nonbillables_proc = test_utils.new_remove_nonbillables_processor()
+        data = remove_nonbillables_proc._remove_nonbillables(
+            data, nonbillable_pis, nonbillable_projects
+        )
+        self.assertTrue(data[data["Manager (PI)"].isin(nonbillable_pis)].empty)
+        self.assertTrue(
+            data[data["Project - Allocation"].isin(nonbillable_projects)].empty
+        )
+        self.assertTrue(data.equals(data[data["Manager (PI)"].isin(billable_pis)]))
+
+
+class TestValidateBillablePIProcessor(TestCase):
+    def test_validate_billables(self):
+        test_data = pandas.DataFrame(
+            {
+                "Manager (PI)": ["PI1", math.nan, "PI1", "PI2", "PI2"],
+                "Project - Allocation": [
+                    "ProjectA",
+                    "ProjectB",
+                    "ProjectC",
+                    "ProjectD",
+                    "ProjectE",
+                ],
+            }
+        )
+        self.assertEqual(1, len(test_data[pandas.isna(test_data["Manager (PI)"])]))
+        validate_billable_pi_proc = test_utils.new_validate_billable_pi_processor()
+        output_data = validate_billable_pi_proc._validate_pi_names(test_data)
+        self.assertEqual(0, len(output_data[pandas.isna(output_data["Manager (PI)"])]))
 
 
 class TestMonthUtils(TestCase):
@@ -704,31 +727,6 @@ class TestBUSubsidy(TestCase):
         self.assertEqual(50, output_df.loc[3, "Balance"])
 
 
-class TestValidateBillables(TestCase):
-    def setUp(self):
-        data = {
-            "Manager (PI)": ["PI1", math.nan, "PI1", "PI2", "PI2"],
-            "Project - Allocation": [
-                "ProjectA",
-                "ProjectB",
-                "ProjectC",
-                "ProjectD",
-                "ProjectE",
-            ],
-        }
-        self.dataframe = pandas.DataFrame(data)
-
-    def test_validate_billables(self):
-        self.assertEqual(
-            1, len(self.dataframe[pandas.isna(self.dataframe["Manager (PI)"])])
-        )
-        test_invoice = test_utils.new_billable_invoice()
-        validated_df = test_invoice._validate_pi_names(self.dataframe)
-        self.assertEqual(
-            0, len(validated_df[pandas.isna(validated_df["Manager (PI)"])])
-        )
-
-
 class TestExportLenovo(TestCase):
     def setUp(self):
         data = {
@@ -773,7 +771,7 @@ class TestExportLenovo(TestCase):
                     process_report.PROJECT_FIELD,
                     process_report.INSTITUTION_FIELD,
                     process_report.SU_TYPE_FIELD,
-                    "SU Hours",
+                    process_report.SU_HOURS_FIELD,
                     "SU Charge",
                     "Charge",
                 ]
@@ -785,7 +783,9 @@ class TestExportLenovo(TestCase):
                 row[process_report.SU_TYPE_FIELD],
                 ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"],
             )
-            self.assertEqual(row["Charge"], row["SU Charge"] * row["SU Hours"])
+            self.assertEqual(
+                row["Charge"], row["SU Charge"] * row["SU Hours (GBhr or SUhr)"]
+            )
 
 
 class TestUploadToS3(TestCase):
@@ -833,3 +833,15 @@ class TestUploadToS3(TestCase):
 
         for i, call_args in enumerate(mock_bucket.upload_file.call_args_list):
             self.assertTrue(answers[i] in call_args)
+
+
+class TestBaseInvoice(TestCase):
+    def test_filter_exported_columns(self):
+        test_invoice = pandas.DataFrame(columns=["C1", "C2", "C3", "C4", "C5"])
+        answer_invoice = pandas.DataFrame(columns=["C1", "C3R", "C5R"])
+        inv = test_utils.new_base_invoice(data=test_invoice)
+        inv.export_columns_list = ["C1", "C3", "C5"]
+        inv.exported_columns_map = {"C3": "C3R", "C5": "C5R"}
+        inv._filter_columns()
+
+        self.assertTrue(inv.data.equals(answer_invoice))

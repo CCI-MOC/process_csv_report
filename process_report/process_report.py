@@ -2,7 +2,6 @@ import argparse
 import sys
 import datetime
 
-import json
 import pandas
 import pyarrow
 
@@ -15,7 +14,12 @@ from process_report.invoices import (
     bu_internal_invoice,
     pi_specific_invoice,
 )
-
+from process_report.processors import (
+    validate_pi_alias_processor,
+    add_institution_processor,
+    remove_nonbillables_processor,
+    validate_billable_pi_processor,
+)
 
 ### PI file field names
 PI_PI_FIELD = "PI"
@@ -49,26 +53,6 @@ PI_S3_FILEPATH = "PIs/PI.csv"
 
 
 ALIAS_S3_FILEPATH = "PIs/alias.csv"
-
-
-def get_institution_from_pi(institute_map, pi_uname):
-    institution_domain = pi_uname.split("@")[-1]
-    for i in range(institution_domain.count(".") + 1):
-        if institution_name := institute_map.get(institution_domain, ""):
-            break
-        institution_domain = institution_domain[institution_domain.find(".") + 1 :]
-
-    if institution_name == "":
-        print(f"Warning: PI name {pi_uname} does not match any institution!")
-
-    return institution_name
-
-
-def load_institute_map() -> dict:
-    with open("process_report/institute_map.json", "r") as f:
-        institute_map = json.load(f)
-
-    return institute_map
 
 
 def load_alias(alias_file):
@@ -220,18 +204,46 @@ def main():
 
     projects = list(set(projects + timed_projects_list))
 
-    merged_dataframe = validate_pi_aliases(merged_dataframe, alias_dict)
-    merged_dataframe = add_institution(merged_dataframe)
+    ### Preliminary processing
+
+    validate_pi_alias_proc = validate_pi_alias_processor.ValidatePIAliasProcessor(
+        "", invoice_month, merged_dataframe, alias_dict
+    )
+    validate_pi_alias_proc.process()
+
+    add_institute_proc = add_institution_processor.AddInstitutionProcessor(
+        "", invoice_month, validate_pi_alias_proc.data
+    )
+    add_institute_proc.process()
+
+    ### Finish preliminary processing
+
     lenovo_inv = lenovo_invoice.LenovoInvoice(
-        name=args.Lenovo_file, invoice_month=invoice_month, data=merged_dataframe.copy()
+        name=args.Lenovo_file, invoice_month=invoice_month, data=add_institute_proc.data
     )
     nonbillable_inv = nonbillable_invoice.NonbillableInvoice(
         name=args.nonbillable_file,
         invoice_month=invoice_month,
-        data=merged_dataframe.copy(),
+        data=add_institute_proc.data,
         nonbillable_pis=pi,
         nonbillable_projects=projects,
     )
+
+    ### Remove nonbillables
+
+    remove_nonbillables_proc = remove_nonbillables_processor.RemoveNonbillables(
+        "", invoice_month, add_institute_proc.data, pi, projects
+    )
+    remove_nonbillables_proc.process()
+
+    validate_billable_pi_proc = (
+        validate_billable_pi_processor.ValidateBillablePIsProcessor(
+            "", invoice_month, remove_nonbillables_proc.data
+        )
+    )
+    validate_billable_pi_proc.process()
+
+    ### Initialize invoices
 
     if args.upload_to_s3:
         backup_to_s3_old_pi_file(old_pi_file)
@@ -239,9 +251,7 @@ def main():
     billable_inv = billable_invoice.BillableInvoice(
         name=args.output_file,
         invoice_month=invoice_month,
-        data=merged_dataframe.copy(),
-        nonbillable_pis=pi,
-        nonbillable_projects=projects,
+        data=validate_billable_pi_proc.data.copy(),
         old_pi_filepath=old_pi_file,
     )
 
@@ -330,13 +340,6 @@ def timed_projects(timed_projects_file, invoice_date):
     return dataframe[mask]["Project"].to_list()
 
 
-def validate_pi_aliases(dataframe: pandas.DataFrame, alias_dict: dict):
-    for pi, pi_aliases in alias_dict.items():
-        dataframe.loc[dataframe[PI_FIELD].isin(pi_aliases), PI_FIELD] = pi
-
-    return dataframe
-
-
 def fetch_s3_alias_file():
     local_name = "alias.csv"
     invoice_bucket = get_invoice_bucket()
@@ -354,32 +357,6 @@ def fetch_s3_old_pi_file():
 def backup_to_s3_old_pi_file(old_pi_file):
     invoice_bucket = get_invoice_bucket()
     invoice_bucket.upload_file(old_pi_file, f"PIs/Archive/PI {get_iso8601_time()}.csv")
-
-
-def add_institution(dataframe: pandas.DataFrame):
-    """Determine every PI's institution name, logging any PI whose institution cannot be determined
-    This is performed by `get_institution_from_pi()`, which tries to match the PI's username to
-    a list of known institution email domains (i.e bu.edu), or to several edge cases (i.e rudolph) if
-    the username is not an email address.
-
-    Exact matches are then mapped to the corresponding institution name.
-
-    I.e "foo@bu.edu" would match with "bu.edu", which maps to the instition name "Boston University"
-
-    The list of mappings are defined in `institute_map.json`.
-    """
-    institute_map = load_institute_map()
-    dataframe = dataframe.astype({INSTITUTION_FIELD: "str"})
-    for i, row in dataframe.iterrows():
-        pi_name = row[PI_FIELD]
-        if pandas.isna(pi_name):
-            print(f"Project {row[PROJECT_FIELD]} has no PI")
-        else:
-            dataframe.at[i, INSTITUTION_FIELD] = get_institution_from_pi(
-                institute_map, pi_name
-            )
-
-    return dataframe
 
 
 def export_billables(dataframe, output_file):
