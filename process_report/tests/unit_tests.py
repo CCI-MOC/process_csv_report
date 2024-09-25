@@ -8,7 +8,7 @@ import math
 from textwrap import dedent
 
 from process_report import process_report, util
-from process_report.invoices import lenovo_invoice, nonbillable_invoice
+from process_report.invoices import nonbillable_invoice
 from process_report.tests import util as test_utils
 
 
@@ -219,7 +219,7 @@ class TestExportPICSV(TestCase):
         self.assertNotIn("ProjectC", pi_df["Project - Allocation"].tolist())
 
 
-class TestGetInstitute(TestCase):
+class TestAddInstituteProcessor(TestCase):
     def test_get_pi_institution(self):
         institute_map = {
             "harvard.edu": "Harvard University",
@@ -248,31 +248,34 @@ class TestGetInstitute(TestCase):
             "g@bidmc.harvard.edu": "Beth Israel Deaconess Medical Center",
         }
 
+        add_institute_proc = test_utils.new_add_institution_processor()
+
         for pi_email, answer in answers.items():
             self.assertEqual(
-                process_report.get_institution_from_pi(institute_map, pi_email), answer
+                add_institute_proc._get_institution_from_pi(institute_map, pi_email),
+                answer,
             )
 
 
-class TestAlias(TestCase):
-    def setUp(self):
-        self.alias_dict = {"PI1": ["PI1_1", "PI1_2"], "PI2": ["PI2_1"]}
-
-        self.data = pandas.DataFrame(
+class TestValidateAliasProcessor(TestCase):
+    def test_validate_alias(self):
+        alias_map = {"PI1": ["PI1_1", "PI1_2"], "PI2": ["PI2_1"]}
+        test_data = pandas.DataFrame(
             {
                 "Manager (PI)": ["PI1", "PI1_1", "PI1_2", "PI2_1", "PI2_1"],
             }
         )
-
-        self.answer = pandas.DataFrame(
+        answer_data = pandas.DataFrame(
             {
                 "Manager (PI)": ["PI1", "PI1", "PI1", "PI2", "PI2"],
             }
         )
 
-    def test_validate_alias(self):
-        output = process_report.validate_pi_aliases(self.data, self.alias_dict)
-        self.assertTrue(self.answer.equals(output))
+        validate_pi_alias_proc = test_utils.new_validate_pi_alias_processor(
+            data=test_data, alias_map=alias_map
+        )
+        validate_pi_alias_proc.process()
+        self.assertTrue(answer_data.equals(validate_pi_alias_proc.data))
 
 
 class TestMonthUtils(TestCase):
@@ -729,63 +732,22 @@ class TestValidateBillables(TestCase):
         )
 
 
-class TestExportLenovo(TestCase):
-    def setUp(self):
-        data = {
-            "Invoice Month": [
-                "2023-01",
-                "2023-01",
-                "2023-01",
-                "2023-01",
-                "2023-01",
-                "2023-01",
-            ],
-            "Project - Allocation": [
-                "ProjectA",
-                "ProjectB",
-                "ProjectC",
-                "ProjectD",
-                "ProjectE",
-                "ProjectF",
-            ],
-            "Institution": ["A", "B", "C", "D", "E", "F"],
-            "SU Hours (GBhr or SUhr)": [1, 10, 100, 4, 432, 10],
-            "SU Type": [
-                "OpenShift GPUA100SXM4",
-                "OpenShift GPUA100",
-                "OpenShift GPUA100SXM4",
-                "OpenStack GPUA100SXM4",
-                "OpenStack CPU",
-                "OpenStack GPUK80",
-            ],
-        }
-        self.lenovo_invoice = lenovo_invoice.LenovoInvoice(
-            "Lenovo", "2023-01", pandas.DataFrame(data)
-        )
-        self.lenovo_invoice.process()
-
+class TestLenovoProcessor(TestCase):
     def test_process_lenovo(self):
-        output_df = self.lenovo_invoice.data
-        self.assertTrue(
-            set(
-                [
-                    process_report.INVOICE_DATE_FIELD,
-                    process_report.PROJECT_FIELD,
-                    process_report.INSTITUTION_FIELD,
-                    process_report.SU_TYPE_FIELD,
-                    "SU Hours",
-                    "SU Charge",
-                    "Charge",
-                ]
-            ).issubset(output_df)
+        test_invoice = pandas.DataFrame(
+            {
+                "SU Hours (GBhr or SUhr)": [1, 10, 100, 4, 432, 10],
+            }
+        )
+        answer_invoice = test_invoice.copy()
+        answer_invoice["SU Charge"] = 1
+        answer_invoice["Charge"] = (
+            answer_invoice["SU Hours (GBhr or SUhr)"] * answer_invoice["SU Charge"]
         )
 
-        for i, row in output_df.iterrows():
-            self.assertIn(
-                row[process_report.SU_TYPE_FIELD],
-                ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"],
-            )
-            self.assertEqual(row["Charge"], row["SU Charge"] * row["SU Hours"])
+        lenovo_proc = test_utils.new_lenovo_processor(data=test_invoice)
+        lenovo_proc.process()
+        self.assertTrue(lenovo_proc.data.equals(answer_invoice))
 
 
 class TestUploadToS3(TestCase):
@@ -833,3 +795,15 @@ class TestUploadToS3(TestCase):
 
         for i, call_args in enumerate(mock_bucket.upload_file.call_args_list):
             self.assertTrue(answers[i] in call_args)
+
+
+class TestBaseInvoice(TestCase):
+    def test_filter_exported_columns(self):
+        test_invoice = pandas.DataFrame(columns=["C1", "C2", "C3", "C4", "C5"])
+        answer_invoice = pandas.DataFrame(columns=["C1", "C3R", "C5R"])
+        inv = test_utils.new_base_invoice(data=test_invoice)
+        inv.export_columns_list = ["C1", "C3", "C5"]
+        inv.exported_columns_map = {"C3": "C3R", "C5": "C5R"}
+        inv._filter_columns()
+
+        self.assertTrue(inv.data.equals(answer_invoice))

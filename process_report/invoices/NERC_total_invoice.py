@@ -12,6 +12,24 @@ class NERCTotalInvoice(invoice.Invoice):
         "University of Rhode Island",
     ]
 
+    export_columns_list = [
+        invoice.INVOICE_DATE_FIELD,
+        invoice.PROJECT_FIELD,
+        invoice.PROJECT_ID_FIELD,
+        invoice.PI_FIELD,
+        invoice.INVOICE_EMAIL_FIELD,
+        invoice.INVOICE_ADDRESS_FIELD,
+        invoice.INSTITUTION_FIELD,
+        invoice.INSTITUTION_ID_FIELD,
+        invoice.SU_HOURS_FIELD,
+        invoice.SU_TYPE_FIELD,
+        invoice.RATE_FIELD,
+        invoice.COST_FIELD,
+        invoice.CREDIT_FIELD,
+        invoice.CREDIT_CODE_FIELD,
+        invoice.BALANCE_FIELD,
+    ]
+
     @property
     def output_path(self) -> str:
         return f"NERC-{self.invoice_month}-Total-Invoice.csv"
