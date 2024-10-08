@@ -180,7 +180,10 @@ class TestExportPICSV(TestCase):
         self.dataframe = pandas.DataFrame(data)
         self.invoice_month = data["Invoice Month"][0]
 
-    def test_export_pi(self):
+    @mock.patch("process_report.invoices.invoice.Invoice._filter_columns")
+    def test_export_pi(self, mock_filter_cols):
+        mock_filter_cols.return_value = self.dataframe
+
         output_dir = tempfile.TemporaryDirectory()
         pi_inv = test_utils.new_pi_specific_invoice(
             output_dir.name, invoice_month=self.invoice_month, data=self.dataframe
@@ -773,7 +776,7 @@ class TestExportLenovo(TestCase):
                     process_report.PROJECT_FIELD,
                     process_report.INSTITUTION_FIELD,
                     process_report.SU_TYPE_FIELD,
-                    "SU Hours",
+                    process_report.SU_HOURS_FIELD,
                     "SU Charge",
                     "Charge",
                 ]
@@ -785,7 +788,9 @@ class TestExportLenovo(TestCase):
                 row[process_report.SU_TYPE_FIELD],
                 ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"],
             )
-            self.assertEqual(row["Charge"], row["SU Charge"] * row["SU Hours"])
+            self.assertEqual(
+                row["Charge"], row["SU Charge"] * row["SU Hours (GBhr or SUhr)"]
+            )
 
 
 class TestUploadToS3(TestCase):
@@ -868,3 +873,15 @@ class TestNERCRates(TestCase):
         output_df = sample_inv._filter_partners(sample_df)
         answer_df = pandas.DataFrame({"Institution": ["BU", "HU", "NEU"]})
         self.assertTrue(output_df.equals(answer_df))
+
+
+class TestBaseInvoice(TestCase):
+    def test_filter_exported_columns(self):
+        test_invoice = pandas.DataFrame(columns=["C1", "C2", "C3", "C4", "C5"])
+        answer_invoice = pandas.DataFrame(columns=["C1", "C3R", "C5R"])
+        inv = test_utils.new_base_invoice(data=test_invoice)
+        inv.export_columns_list = ["C1", "C3", "C5"]
+        inv.exported_columns_map = {"C3": "C3R", "C5": "C5R"}
+        result_invoice = inv._filter_columns()
+
+        self.assertTrue(result_invoice.equals(answer_invoice))

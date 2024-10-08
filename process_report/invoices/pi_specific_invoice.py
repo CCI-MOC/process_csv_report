@@ -9,6 +9,24 @@ import process_report.util as util
 
 @dataclass
 class PIInvoice(invoice.Invoice):
+    export_columns_list = [
+        invoice.INVOICE_DATE_FIELD,
+        invoice.PROJECT_FIELD,
+        invoice.PROJECT_ID_FIELD,
+        invoice.PI_FIELD,
+        invoice.INVOICE_EMAIL_FIELD,
+        invoice.INVOICE_ADDRESS_FIELD,
+        invoice.INSTITUTION_FIELD,
+        invoice.INSTITUTION_ID_FIELD,
+        invoice.SU_HOURS_FIELD,
+        invoice.SU_TYPE_FIELD,
+        invoice.RATE_FIELD,
+        invoice.COST_FIELD,
+        invoice.CREDIT_FIELD,
+        invoice.CREDIT_CODE_FIELD,
+        invoice.BALANCE_FIELD,
+    ]
+
     def _prepare(self):
         self.pi_list = self.data[invoice.PI_FIELD].unique()
 
@@ -16,12 +34,13 @@ class PIInvoice(invoice.Invoice):
         def _export_pi_invoice(pi):
             if pandas.isna(pi):
                 return
-            pi_projects = self.data[self.data[invoice.PI_FIELD] == pi]
+            pi_projects = export_data[export_data[invoice.PI_FIELD] == pi]
             pi_instituition = pi_projects[invoice.INSTITUTION_FIELD].iat[0]
             pi_projects.to_csv(
                 f"{self.name}/{pi_instituition}_{pi} {self.invoice_month}.csv"
             )
 
+        export_data = self._filter_columns()
         if not os.path.exists(
             self.name
         ):  # self.name is name of folder storing invoices
