@@ -7,6 +7,16 @@ import process_report.invoices.discount_invoice as discount_invoice
 
 @dataclass
 class BUInternalInvoice(discount_invoice.DiscountInvoice):
+    export_columns_list = [
+        invoice.INVOICE_DATE_FIELD,
+        invoice.PI_FIELD,
+        "Project",
+        invoice.COST_FIELD,
+        invoice.CREDIT_FIELD,
+        invoice.SUBSIDY_FIELD,
+        invoice.BALANCE_FIELD,
+    ]
+
     subsidy_amount: int
 
     def _prepare(self):
@@ -22,17 +32,6 @@ class BUInternalInvoice(discount_invoice.DiscountInvoice):
         ].copy()
         self.data["Project"] = self.data.apply(get_project, axis=1)
         self.data[invoice.SUBSIDY_FIELD] = Decimal(0)
-        self.data = self.data[
-            [
-                invoice.INVOICE_DATE_FIELD,
-                invoice.PI_FIELD,
-                "Project",
-                invoice.COST_FIELD,
-                invoice.CREDIT_FIELD,
-                invoice.SUBSIDY_FIELD,
-                invoice.BALANCE_FIELD,
-            ]
-        ]
 
     def _process(self):
         data_summed_projects = self._sum_project_allocations(self.data)

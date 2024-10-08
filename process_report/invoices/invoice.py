@@ -23,6 +23,7 @@ INSTITUTION_FIELD = "Institution"
 INSTITUTION_ID_FIELD = "Institution - Specific Code"
 SU_HOURS_FIELD = "SU Hours (GBhr or SUhr)"
 SU_TYPE_FIELD = "SU Type"
+RATE_FIELD = "Rate"
 COST_FIELD = "Cost"
 CREDIT_FIELD = "Credit"
 CREDIT_CODE_FIELD = "Credit Code"
@@ -33,6 +34,9 @@ BALANCE_FIELD = "Balance"
 
 @dataclass
 class Invoice:
+    export_columns_list = list()
+    exported_columns_map = dict()
+
     name: str
     invoice_month: str
     data: pandas.DataFrame
@@ -78,8 +82,15 @@ class Invoice:
         that should or should not be exported after processing."""
         pass
 
+    def _filter_columns(self):
+        """Filters and renames columns before exporting"""
+        return self.data.copy()[self.export_columns_list].rename(
+            columns=self.exported_columns_map
+        )
+
     def export(self):
-        self.data.to_csv(self.output_path, index=False)
+        export_data = self._filter_columns()
+        export_data.to_csv(self.output_path, index=False)
 
     def export_s3(self, s3_bucket):
         s3_bucket.upload_file(self.output_path, self.output_s3_key)

@@ -7,6 +7,11 @@ from process_report.invoices import (
     pi_specific_invoice,
 )
 
+from process_report.processors import (
+    add_institution_processor,
+    validate_pi_alias_processor,
+)
+
 
 def new_base_invoice(
     name="",
@@ -53,4 +58,20 @@ def new_pi_specific_invoice(
         name,
         invoice_month,
         data,
+    )
+
+
+def new_add_institution_processor(
+    name="",
+    invoice_month="0000-00",
+    data=pandas.DataFrame(),
+):
+    return add_institution_processor.AddInstitutionProcessor(name, invoice_month, data)
+
+
+def new_validate_pi_alias_processor(
+    name="", invoice_month="0000-00", data=pandas.DataFrame(), alias_map={}
+):
+    return validate_pi_alias_processor.ValidatePIAliasProcessor(
+        name, invoice_month, data, alias_map
     )
