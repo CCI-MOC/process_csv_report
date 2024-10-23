@@ -10,6 +10,7 @@ from process_report.invoices import (
 from process_report.processors import (
     add_institution_processor,
     validate_pi_alias_processor,
+    lenovo_processor,
 )
 
 
@@ -75,3 +76,7 @@ def new_validate_pi_alias_processor(
     return validate_pi_alias_processor.ValidatePIAliasProcessor(
         name, invoice_month, data, alias_map
     )
+
+
+def new_lenovo_processor(name="", invoice_month="0000-00", data=pandas.DataFrame()):
+    return lenovo_processor.LenovoProcessor(name, invoice_month, data)

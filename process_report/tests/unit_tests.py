@@ -8,7 +8,7 @@ import math
 from textwrap import dedent
 
 from process_report import process_report, util
-from process_report.invoices import lenovo_invoice, nonbillable_invoice
+from process_report.invoices import nonbillable_invoice
 from process_report.tests import util as test_utils
 
 
@@ -735,65 +735,22 @@ class TestValidateBillables(TestCase):
         )
 
 
-class TestExportLenovo(TestCase):
-    def setUp(self):
-        data = {
-            "Invoice Month": [
-                "2023-01",
-                "2023-01",
-                "2023-01",
-                "2023-01",
-                "2023-01",
-                "2023-01",
-            ],
-            "Project - Allocation": [
-                "ProjectA",
-                "ProjectB",
-                "ProjectC",
-                "ProjectD",
-                "ProjectE",
-                "ProjectF",
-            ],
-            "Institution": ["A", "B", "C", "D", "E", "F"],
-            "SU Hours (GBhr or SUhr)": [1, 10, 100, 4, 432, 10],
-            "SU Type": [
-                "OpenShift GPUA100SXM4",
-                "OpenShift GPUA100",
-                "OpenShift GPUA100SXM4",
-                "OpenStack GPUA100SXM4",
-                "OpenStack CPU",
-                "OpenStack GPUK80",
-            ],
-        }
-        self.lenovo_invoice = lenovo_invoice.LenovoInvoice(
-            "Lenovo", "2023-01", pandas.DataFrame(data)
-        )
-        self.lenovo_invoice.process()
-
+class TestLenovoProcessor(TestCase):
     def test_process_lenovo(self):
-        output_df = self.lenovo_invoice.data
-        self.assertTrue(
-            set(
-                [
-                    process_report.INVOICE_DATE_FIELD,
-                    process_report.PROJECT_FIELD,
-                    process_report.INSTITUTION_FIELD,
-                    process_report.SU_TYPE_FIELD,
-                    process_report.SU_HOURS_FIELD,
-                    "SU Charge",
-                    "Charge",
-                ]
-            ).issubset(output_df)
+        test_invoice = pandas.DataFrame(
+            {
+                "SU Hours (GBhr or SUhr)": [1, 10, 100, 4, 432, 10],
+            }
+        )
+        answer_invoice = test_invoice.copy()
+        answer_invoice["SU Charge"] = 1
+        answer_invoice["Charge"] = (
+            answer_invoice["SU Hours (GBhr or SUhr)"] * answer_invoice["SU Charge"]
         )
 
-        for i, row in output_df.iterrows():
-            self.assertIn(
-                row[process_report.SU_TYPE_FIELD],
-                ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"],
-            )
-            self.assertEqual(
-                row["Charge"], row["SU Charge"] * row["SU Hours (GBhr or SUhr)"]
-            )
+        lenovo_proc = test_utils.new_lenovo_processor(data=test_invoice)
+        lenovo_proc.process()
+        self.assertTrue(lenovo_proc.data.equals(answer_invoice))
 
 
 class TestUploadToS3(TestCase):

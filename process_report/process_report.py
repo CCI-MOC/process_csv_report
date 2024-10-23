@@ -18,6 +18,7 @@ from process_report.invoices import (
 from process_report.processors import (
     validate_pi_alias_processor,
     add_institution_processor,
+    lenovo_processor,
 )
 
 ### PI file field names
@@ -215,7 +216,12 @@ def main():
     )
     add_institute_proc.process()
 
-    preliminary_processed_data = add_institute_proc.data
+    lenovo_proc = lenovo_processor.LenovoProcessor(
+        "", invoice_month, add_institute_proc.data
+    )
+    lenovo_proc.process()
+
+    preliminary_processed_data = lenovo_proc.data
 
     ### Finish preliminary processing
 
