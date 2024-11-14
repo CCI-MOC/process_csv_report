@@ -12,6 +12,18 @@ PI_1ST_USED = "1st Month Used"
 PI_2ND_USED = "2nd Month Used"
 ###
 
+### Prepay files fields
+PREPAY_MONTH_FIELD = "Month"
+PREPAY_CREDIT_FIELD = "Credit"
+PREPAY_DEBIT_FIELD = "Debit"
+PREPAY_GROUP_NAME_FIELD = "Group Name"
+PREPAY_GROUP_CONTACT_FIELD = "Group Contact Email"
+PREPAY_MANAGED_FIELD = "MGHPCC Managed"
+PREPAY_PROJECT_FIELD = "Project"
+PREPAY_START_DATE_FIELD = "Start Date"
+PREPAY_END_DATE_FIELD = "End Date"
+###
+
 ### Invoice field names
 INVOICE_DATE_FIELD = "Invoice Month"
 PROJECT_FIELD = "Project - Allocation"
@@ -21,6 +33,10 @@ INVOICE_EMAIL_FIELD = "Invoice Email"
 INVOICE_ADDRESS_FIELD = "Invoice Address"
 INSTITUTION_FIELD = "Institution"
 INSTITUTION_ID_FIELD = "Institution - Specific Code"
+GROUP_NAME_FIELD = "Prepaid Group Name"
+GROUP_INSTITUTION_FIELD = "Prepaid Group Institution"
+GROUP_BALANCE_FIELD = "Prepaid Group Balance"
+GROUP_BALANCE_USED_FIELD = "Prepaid Group Used"
 SU_HOURS_FIELD = "SU Hours (GBhr or SUhr)"
 SU_TYPE_FIELD = "SU Type"
 SU_CHARGE_FIELD = "SU Charge"
@@ -38,6 +54,7 @@ IS_BILLABLE_FIELD = "Is Billable"
 MISSING_PI_FIELD = "Missing PI"
 PI_BALANCE_FIELD = "PI Balance"
 PROJECT_NAME_FIELD = "Project"
+GROUP_MANAGED_FIELD = "MGHPCC Managed"
 ###
 
 

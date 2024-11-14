@@ -13,6 +13,7 @@ from process_report.processors import (
     validate_billable_pi_processor,
     new_pi_credit_processor,
     bu_subsidy_processor,
+    prepayment_processor,
 )
 
 
@@ -139,4 +140,32 @@ def new_bu_subsidy_processor(
         data = pandas.DataFrame()
     return bu_subsidy_processor.BUSubsidyProcessor(
         name, invoice_month, data, subsidy_amount
+    )
+
+
+def new_prepayment_processor(
+    name="",
+    invoice_month="0000-00",
+    data=None,
+    prepay_credits=None,
+    prepay_debits_filepath="",
+    prepay_projects=None,
+    prepay_contacts=None,
+    upload_to_s3=False,
+):
+    if prepay_credits is None:
+        prepay_credits = pandas.DataFrame()
+    if prepay_projects is None:
+        prepay_projects = pandas.DataFrame()
+    if prepay_contacts is None:
+        prepay_contacts = pandas.DataFrame()
+    return prepayment_processor.PrepaymentProcessor(
+        name,
+        invoice_month,
+        data,
+        prepay_credits,
+        prepay_projects,
+        prepay_contacts,
+        prepay_debits_filepath,
+        upload_to_s3,
     )

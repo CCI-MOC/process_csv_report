@@ -22,6 +22,7 @@ from process_report.processors import (
     validate_billable_pi_processor,
     new_pi_credit_processor,
     bu_subsidy_processor,
+    prepayment_processor,
 )
 
 ### PI file field names
@@ -53,9 +54,8 @@ BALANCE_FIELD = "Balance"
 ###
 
 PI_S3_FILEPATH = "PIs/PI.csv"
-
-
 ALIAS_S3_FILEPATH = "PIs/alias.csv"
+PREPAY_DEBITS_S3_FILEPATH = "Prepay/prepay_debits.csv"
 
 
 def load_alias(alias_file):
@@ -71,6 +71,14 @@ def load_alias(alias_file):
         sys.exit(1)
 
     return alias_dict
+
+
+def load_prepay_csv(prepay_credits_path, prepay_projects_path, prepay_contacts_path):
+    return (
+        pandas.read_csv(prepay_credits_path),
+        pandas.read_csv(prepay_projects_path),
+        pandas.read_csv(prepay_contacts_path),
+    )
 
 
 def get_iso8601_time():
@@ -116,6 +124,24 @@ def main():
         "--timed-projects-file",
         required=True,
         help="File containing list of projects that are non-billable within a specified duration",
+    )
+    parser.add_argument(
+        "--prepay-credits",
+        required=False,
+        default="prepaid_credits.csv",
+        help="CSV listing all prepay group credits. Defaults to 'prepaid_credits.csv'",
+    )
+    parser.add_argument(
+        "--prepay-projects",
+        required=False,
+        default="prepaid_projects.csv",
+        help="CSV listing all prepay group projects. Defaults to 'prepaid_projects.csv'",
+    )
+    parser.add_argument(
+        "--prepay-contacts",
+        required=False,
+        default="prepaid_contacts.csv",
+        help="CSV listing all prepay group contact information. Defaults to 'prepaid_contacts.csv'",
     )
 
     parser.add_argument(
@@ -165,6 +191,11 @@ def main():
         help="Name of alias file listing PIs with aliases (and their aliases). If not provided, defaults to fetching from S3",
     )
     parser.add_argument(
+        "--prepay-debits",
+        required=False,
+        help="Name of csv file listing all prepay group debits. If not provided, defaults to fetching from S3",
+    )
+    parser.add_argument(
         "--BU-subsidy-amount",
         required=True,
         type=int,
@@ -189,6 +220,15 @@ def main():
     else:
         alias_file = fetch_s3_alias_file()
     alias_dict = load_alias(alias_file)
+
+    if args.prepay_debits:
+        prepay_debits_filepath = args.prepay_debits
+    else:
+        prepay_debits_filepath = fetch_s3_prepay_debits()
+
+    prepay_credits, prepay_projects, prepay_info = load_prepay_csv(
+        args.prepay_credits, args.prepay_projects, args.prepay_contacts
+    )
 
     merged_dataframe = merge_csv(csv_files)
 
@@ -248,7 +288,19 @@ def main():
     )
     bu_subsidy_proc.process()
 
-    processed_data = bu_subsidy_proc.data
+    prepayment_proc = prepayment_processor.PrepaymentProcessor(
+        "",
+        invoice_month,
+        bu_subsidy_proc.data,
+        prepay_credits,
+        prepay_projects,
+        prepay_info,
+        prepay_debits_filepath,
+        args.upload_to_s3,
+    )
+    prepayment_proc.process()
+
+    processed_data = prepayment_proc.data
 
     ### Initialize invoices
 
@@ -375,6 +427,13 @@ def fetch_s3_old_pi_file():
     local_name = "PI.csv"
     invoice_bucket = util.get_invoice_bucket()
     invoice_bucket.download_file(PI_S3_FILEPATH, local_name)
+    return local_name
+
+
+def fetch_s3_prepay_debits():
+    local_name = "prepay_debits.csv"
+    invoice_bucket = util.get_invoice_bucket()
+    invoice_bucket.download_file(PREPAY_DEBITS_S3_FILEPATH, local_name)
     return local_name
 
 
