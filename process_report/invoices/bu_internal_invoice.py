@@ -7,6 +7,12 @@ import process_report.invoices.discount_invoice as discount_invoice
 
 @dataclass
 class BUInternalInvoice(discount_invoice.DiscountInvoice):
+    """
+    This invoice operates on data processed by these Processors:
+    - ValidateBillablePIsProcessor
+    - NewPICreditProcessor
+    """
+
     export_columns_list = [
         invoice.INVOICE_DATE_FIELD,
         invoice.PI_FIELD,
@@ -27,6 +33,9 @@ class BUInternalInvoice(discount_invoice.DiscountInvoice):
             else:
                 return project_alloc[: project_alloc.rfind("-")]
 
+        self.data = self.data[
+            self.data[invoice.IS_BILLABLE_FIELD] & ~self.data[invoice.MISSING_PI_FIELD]
+        ]
         self.data = self.data[
             self.data[invoice.INSTITUTION_FIELD] == "Boston University"
         ].copy()

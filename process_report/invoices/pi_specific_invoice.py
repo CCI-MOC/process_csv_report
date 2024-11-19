@@ -9,6 +9,12 @@ import process_report.util as util
 
 @dataclass
 class PIInvoice(invoice.Invoice):
+    """
+    This invoice operates on data processed by these Processors:
+    - ValidateBillablePIsProcessor
+    - NewPICreditProcessor
+    """
+
     export_columns_list = [
         invoice.INVOICE_DATE_FIELD,
         invoice.PROJECT_FIELD,
@@ -28,6 +34,9 @@ class PIInvoice(invoice.Invoice):
     ]
 
     def _prepare(self):
+        self.data = self.data[
+            self.data[invoice.IS_BILLABLE_FIELD] & ~self.data[invoice.MISSING_PI_FIELD]
+        ]
         self.pi_list = self.data[invoice.PI_FIELD].unique()
 
     def export(self):

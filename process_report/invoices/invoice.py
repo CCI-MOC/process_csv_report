@@ -36,6 +36,7 @@ BALANCE_FIELD = "Balance"
 ### Internally used field names
 IS_BILLABLE_FIELD = "Is Billable"
 MISSING_PI_FIELD = "Missing PI"
+PI_BALANCE_FIELD = "PI Balance"
 ###
 
 
