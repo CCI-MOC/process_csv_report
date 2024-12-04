@@ -255,12 +255,12 @@ def main():
     lenovo_inv = lenovo_invoice.LenovoInvoice(
         name=args.Lenovo_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
     )
     nonbillable_inv = nonbillable_invoice.NonbillableInvoice(
         name=args.nonbillable_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
         nonbillable_pis=pi,
         nonbillable_projects=projects,
     )
@@ -271,7 +271,7 @@ def main():
     billable_inv = billable_invoice.BillableInvoice(
         name=args.output_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
         old_pi_filepath=old_pi_file,
         updated_old_pi_df=new_pi_credit_proc.updated_old_pi_df,
     )
@@ -279,17 +279,17 @@ def main():
     nerc_total_inv = NERC_total_invoice.NERCTotalInvoice(
         name=args.NERC_total_invoice_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
     )
 
     bu_internal_inv = bu_internal_invoice.BUInternalInvoice(
         name=args.BU_invoice_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
     )
 
     pi_inv = pi_specific_invoice.PIInvoice(
-        name=args.output_folder, invoice_month=invoice_month, data=processed_data.copy()
+        name=args.output_folder, invoice_month=invoice_month, data=processed_data
     )
 
     util.process_and_export_invoices(

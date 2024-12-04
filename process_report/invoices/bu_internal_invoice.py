@@ -24,13 +24,13 @@ class BUInternalInvoice(invoice.Invoice):
     exported_columns_map = {invoice.PI_BALANCE_FIELD: "Balance"}
 
     def _prepare_export(self):
-        self.data = self.data[
+        self.export_data = self.data[
             self.data[invoice.IS_BILLABLE_FIELD] & ~self.data[invoice.MISSING_PI_FIELD]
         ]
-        self.data = self.data[
-            self.data[invoice.INSTITUTION_FIELD] == "Boston University"
+        self.export_data = self.export_data[
+            self.export_data[invoice.INSTITUTION_FIELD] == "Boston University"
         ]
-        self.data = self._sum_project_allocations(self.data)
+        self.export_data = self._sum_project_allocations(self.export_data)
 
     def _sum_project_allocations(self, dataframe):
         """A project may have multiple allocations, and therefore multiple rows
