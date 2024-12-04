@@ -19,6 +19,6 @@ class LenovoInvoice(invoice.Invoice):
     exported_columns_map = {invoice.SU_HOURS_FIELD: "SU Hours"}
 
     def _prepare_export(self):
-        self.data = self.data[
+        self.export_data = self.data[
             self.data[invoice.SU_TYPE_FIELD].isin(self.LENOVO_SU_TYPES)
         ]

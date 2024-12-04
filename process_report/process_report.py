@@ -20,6 +20,8 @@ from process_report.processors import (
     add_institution_processor,
     lenovo_processor,
     validate_billable_pi_processor,
+    new_pi_credit_processor,
+    bu_subsidy_processor,
 )
 
 ### PI file field names
@@ -229,19 +231,36 @@ def main():
     )
     validate_billable_pi_proc.process()
 
-    processed_data = validate_billable_pi_proc.data
+    rates_info = load_from_url()
+    new_pi_credit_proc = new_pi_credit_processor.NewPICreditProcessor(
+        "",
+        invoice_month,
+        data=validate_billable_pi_proc.data,
+        old_pi_filepath=old_pi_file,
+        limit_new_pi_credit_to_partners=rates_info.get_value_at(
+            "Limit New PI Credit to MGHPCC Partners", invoice_month
+        ),
+    )
+    new_pi_credit_proc.process()
+
+    bu_subsidy_proc = bu_subsidy_processor.BUSubsidyProcessor(
+        "", invoice_month, new_pi_credit_proc.data.copy(), args.BU_subsidy_amount
+    )
+    bu_subsidy_proc.process()
+
+    processed_data = bu_subsidy_proc.data
 
     ### Initialize invoices
 
     lenovo_inv = lenovo_invoice.LenovoInvoice(
         name=args.Lenovo_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
     )
     nonbillable_inv = nonbillable_invoice.NonbillableInvoice(
         name=args.nonbillable_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
         nonbillable_pis=pi,
         nonbillable_projects=projects,
     )
@@ -249,40 +268,40 @@ def main():
     if args.upload_to_s3:
         backup_to_s3_old_pi_file(old_pi_file)
 
-    rates_info = load_from_url()
     billable_inv = billable_invoice.BillableInvoice(
         name=args.output_file,
         invoice_month=invoice_month,
-        data=processed_data.copy(),
+        data=processed_data,
         old_pi_filepath=old_pi_file,
-        limit_new_pi_credit_to_partners=rates_info.get_value_at(
-            "Limit New PI Credit to MGHPCC Partners", invoice_month
-        ),
-    )
-
-    util.process_and_export_invoices(
-        [lenovo_inv, nonbillable_inv, billable_inv], args.upload_to_s3
+        updated_old_pi_df=new_pi_credit_proc.updated_old_pi_df,
     )
 
     nerc_total_inv = NERC_total_invoice.NERCTotalInvoice(
         name=args.NERC_total_invoice_file,
         invoice_month=invoice_month,
-        data=billable_inv.data.copy(),
+        data=processed_data,
     )
 
     bu_internal_inv = bu_internal_invoice.BUInternalInvoice(
         name=args.BU_invoice_file,
         invoice_month=invoice_month,
-        data=billable_inv.data.copy(),
-        subsidy_amount=args.BU_subsidy_amount,
+        data=processed_data,
     )
 
     pi_inv = pi_specific_invoice.PIInvoice(
-        name=args.output_folder, invoice_month=invoice_month, data=billable_inv.data
+        name=args.output_folder, invoice_month=invoice_month, data=processed_data
     )
 
     util.process_and_export_invoices(
-        [nerc_total_inv, bu_internal_inv, pi_inv], args.upload_to_s3
+        [
+            lenovo_inv,
+            nonbillable_inv,
+            billable_inv,
+            nerc_total_inv,
+            bu_internal_inv,
+            pi_inv,
+        ],
+        args.upload_to_s3,
     )
 
 
