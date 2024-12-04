@@ -6,6 +6,12 @@ import process_report.util as util
 
 @dataclass
 class NERCTotalInvoice(invoice.Invoice):
+    """
+    This invoice operates on data processed by these Processors:
+    - ValidateBillablePIsProcessor
+    - NewPICreditProcessor
+    """
+
     INCLUDED_INSTITUTIONS = [
         "Harvard University",
         "Boston University",
@@ -24,7 +30,11 @@ class NERCTotalInvoice(invoice.Invoice):
         invoice.SU_HOURS_FIELD,
         invoice.SU_TYPE_FIELD,
         invoice.RATE_FIELD,
+        invoice.GROUP_NAME_FIELD,
+        invoice.GROUP_INSTITUTION_FIELD,
+        invoice.GROUP_BALANCE_FIELD,
         invoice.COST_FIELD,
+        invoice.GROUP_BALANCE_USED_FIELD,
         invoice.CREDIT_FIELD,
         invoice.CREDIT_CODE_FIELD,
         invoice.BALANCE_FIELD,
@@ -45,6 +55,9 @@ class NERCTotalInvoice(invoice.Invoice):
         return f"Invoices/{self.invoice_month}/Archive/NERC-{self.invoice_month}-Total-Invoice {util.get_iso8601_time()}.csv"
 
     def _prepare_export(self):
+        self.data = self.data[
+            self.data[invoice.IS_BILLABLE_FIELD] & ~self.data[invoice.MISSING_PI_FIELD]
+        ]
         self.data = self.data[
             self.data[invoice.INSTITUTION_FIELD].isin(self.INCLUDED_INSTITUTIONS)
         ].copy()
