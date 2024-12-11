@@ -156,7 +156,9 @@ class BillableInvoice(discount_invoice.DiscountInvoice):
         new_pi_credit_amount = get_initial_credit_amount(
             old_pi_df, self.invoice_month, self.INITIAL_CREDIT_AMOUNT
         )
-        print(f"New PI Credit set at {new_pi_credit_amount} for {self.invoice_month}")
+        logger.info(
+            f"New PI Credit set at {new_pi_credit_amount} for {self.invoice_month}"
+        )
 
         credit_eligible_projects = self._get_credit_eligible_projects(data)
         current_pi_set = set(credit_eligible_projects[invoice.PI_FIELD])
@@ -209,8 +211,8 @@ class BillableInvoice(discount_invoice.DiscountInvoice):
                 if (pi_old_pi_entry[credit_used_field] != 0) and (
                     credits_used != pi_old_pi_entry[credit_used_field]
                 ):
-                    print(
-                        f"Warning: PI file overwritten. PI {pi} previously used ${pi_old_pi_entry[credit_used_field]} of New PI credits, now uses ${credits_used}"
+                    logger.warning(
+                        f"PI file overwritten. PI {pi} previously used ${pi_old_pi_entry[credit_used_field]} of New PI credits, now uses ${credits_used}"
                     )
                 old_pi_df.loc[
                     old_pi_df[invoice.PI_PI_FIELD] == pi, credit_used_field
