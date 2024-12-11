@@ -1,10 +1,15 @@
 from dataclasses import dataclass
+import logging
 
 import pandas
 
 from process_report.invoices import invoice
 from process_report.processors import processor
 from process_report import util
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 @dataclass
@@ -27,7 +32,7 @@ class AddInstitutionProcessor(processor.Processor):
             institution_domain = institution_domain[institution_domain.find(".") + 1 :]
 
         if institution_name == "":
-            print(f"Warning: PI name {pi_uname} does not match any institution!")
+            logger.warning(f"PI name {pi_uname} does not match any institution!")
 
         return institution_name
 
@@ -49,7 +54,7 @@ class AddInstitutionProcessor(processor.Processor):
         for i, row in self.data.iterrows():
             pi_name = row[invoice.PI_FIELD]
             if pandas.isna(pi_name):
-                print(f"Project {row[invoice.PROJECT_FIELD]} has no PI")
+                logger.info(f"Project {row[invoice.PROJECT_FIELD]} has no PI")
             else:
                 self.data.at[
                     i, invoice.INSTITUTION_FIELD

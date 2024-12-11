@@ -1,6 +1,7 @@
 import argparse
 import sys
 import datetime
+import logging
 
 import pandas
 import pyarrow
@@ -56,6 +57,10 @@ PI_S3_FILEPATH = "PIs/PI.csv"
 ALIAS_S3_FILEPATH = "PIs/alias.csv"
 
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+
 def load_alias(alias_file):
     alias_dict = dict()
 
@@ -65,7 +70,7 @@ def load_alias(alias_file):
                 pi_alias_info = line.strip().split(",")
                 alias_dict[pi_alias_info[0]] = pi_alias_info[1:]
     except FileNotFoundError:
-        print("Validating PI aliases failed. Alias file does not exist")
+        logging.error("Validating PI aliases failed. Alias file does not exist")
         sys.exit(1)
 
     return alias_dict
@@ -197,11 +202,11 @@ def main():
     with open(args.projects_file) as file:
         projects = [line.rstrip() for line in file]
 
-    print("Invoice date: " + str(invoice_month))
+    logger.info("Invoice date: " + str(invoice_month))
 
     timed_projects_list = timed_projects(args.timed_projects_file, invoice_month)
-    print("The following timed-projects will not be billed for this period: ")
-    print(timed_projects_list)
+    logger.info("The following timed-projects will not be billed for this period: ")
+    logger.info(timed_projects_list)
 
     projects = list(set(projects + timed_projects_list))
 
