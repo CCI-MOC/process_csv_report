@@ -1,7 +1,6 @@
 from unittest import TestCase, mock
 import tempfile
 import pandas
-import pyarrow
 import os
 import uuid
 import math
@@ -110,6 +109,8 @@ class TestExportPICSV(TestCase):
                 "ProjectE",
             ],
             "Untouch Data Column": ["DataA", "DataB", "DataC", "DataD", "DataE"],
+            "Is Billable": [True, True, True, True, True],
+            "Missing PI": [False, False, False, False, False],
         }
         self.dataframe = pandas.DataFrame(data)
         self.invoice_month = data["Invoice Month"][0]
@@ -275,419 +276,660 @@ class TestMonthUtils(TestCase):
             util.get_month_diff("2024-16", "2025-03")
 
 
-class TestCredit0002(TestCase):
-    def setUp(self):
-        data = {
-            "Invoice Month": [
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-            ],
-            "Manager (PI)": [
-                "PI1",
-                "PI2",
-                "PI3",
-                "PI4",
-                "PI4",
-                "PI5",
-                "PI7",
-                "NewPI1",
-                "NewPI1",
-                "NewPI2",
-                "NewPI2",
-            ],
-            "SU Type": [
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-            ],
-            "Project - Allocation": [
-                "ProjectA",
-                "ProjectB",
-                "ProjectC",
-                "ProjectD",
-                "ProjectE",
-                "ProjectF",
-                "ProjectG",
-                "ProjectH",
-                "ProjectI",
-                "ProjectJ",
-                "ProjectK",
-            ],
-            "Cost": [10, 100, 10000, 500, 100, 400, 200, 250, 250, 700, 700],
-        }
-        answer_df_dict = {
-            "Invoice Month": [
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-            ],
-            "Manager (PI)": [
-                "PI1",
-                "PI2",
-                "PI3",
-                "PI4",
-                "PI4",
-                "PI5",
-                "PI7",
-                "NewPI1",
-                "NewPI1",
-                "NewPI2",
-                "NewPI2",
-            ],
-            "SU Type": [
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-                "CPU",
-            ],
-            "Project - Allocation": [
-                "ProjectA",
-                "ProjectB",
-                "ProjectC",
-                "ProjectD",
-                "ProjectE",
-                "ProjectF",
-                "ProjectG",
-                "ProjectH",
-                "ProjectI",
-                "ProjectJ",
-                "ProjectK",
-            ],
-            "Cost": [10, 100, 10000, 500, 100, 400, 200, 250, 250, 700, 700],
-            "Credit": [None, None, None, 100, None, 400, 200, 250, 250, 500, None],
-            "Credit Code": [
-                None,
-                None,
-                None,
-                "0002",
-                None,
-                "0002",
-                "0002",
-                "0002",
-                "0002",
-                "0002",
-                None,
-            ],
-            "Balance": [10, 100, 10000, 400, 100, 0, 0, 0, 0, 200, 700],
-        }
-        self.dataframe = pandas.DataFrame(data)
-        self.dataframe["Credit"] = None
-        self.dataframe["Credit Code"] = None
-        self.dataframe["Balance"] = self.dataframe["Cost"]
-        self.answer_dataframe = pandas.DataFrame(answer_df_dict)
-        old_pi = [
-            "PI,First Invoice Month,Initial Credits,1st Month Used,2nd Month Used",
-            "PI1,2023-09,500,200,0",
-            "PI2,2024-01,2000,0,0",
-            "PI3,2024-01,2000,1000,500",
-            "PI4,2024-02,1000,900,0",
-            "PI5,2024-02,1000,300,500",
-            "PI6,2024-02,1000,700,0",
-            "PI7,2024-03,500,300,0",  # This as current month we're testing, new PIs should get $500
-            "PI8,2024-04,1000,500,0",
-        ]
-        self.old_pi_df_answer = (
-            pandas.DataFrame(
-                {
-                    "PI": [
-                        "PI1",
-                        "PI2",
-                        "PI3",
-                        "PI4",
-                        "PI5",
-                        "PI6",
-                        "PI7",
-                        "NewPI1",
-                        "NewPI2",
-                        "PI8",
-                    ],
-                    "First Invoice Month": [
-                        "2023-09",
-                        "2024-01",
-                        "2024-01",
-                        "2024-02",
-                        "2024-02",
-                        "2024-02",
-                        "2024-03",
-                        "2024-03",
-                        "2024-03",
-                        "2024-04",
-                    ],
-                    "Initial Credits": [
-                        500,
-                        2000,
-                        2000,
-                        1000,
-                        1000,
-                        1000,
-                        500,
-                        500,
-                        500,
-                        1000,
-                    ],
-                    "1st Month Used": [200, 0, 1000, 900, 300, 700, 200, 500, 500, 500],
-                    "2nd Month Used": [0, 0, 500, 100, 400, 0, 0, 0, 0, 0],
-                }
-            )
-            .astype(
-                {
-                    "Initial Credits": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                    "1st Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                    "2nd Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                },
-            )
-            .sort_values(by="PI", ignore_index=True)
+class TestNewPICreditProcessor(TestCase):
+    def _assert_result_invoice_and_old_pi_file(
+        self,
+        invoice_month,
+        test_invoice,
+        test_old_pi_filepath,
+        answer_invoice,
+        answer_old_pi_df,
+    ):
+        new_pi_credit_proc = test_utils.new_new_pi_credit_processor(
+            invoice_month=invoice_month,
+            data=test_invoice,
+            old_pi_filepath=test_old_pi_filepath,
+        )
+        new_pi_credit_proc.process()
+        output_invoice = new_pi_credit_proc.data
+        output_old_pi_df = new_pi_credit_proc.updated_old_pi_df.sort_values(
+            by="PI", ignore_index=True
         )
 
-        # Contains cases with new, one month old, two month old, older PI, and future PI that hasn't appeared in invoices yet
-        # For each invoice month, test case where pi has 1 project, >1, and has spare credit
-        old_pi_file = tempfile.NamedTemporaryFile(
+        answer_invoice = answer_invoice.astype(output_invoice.dtypes)
+        answer_old_pi_df = answer_old_pi_df.astype(output_old_pi_df.dtypes).sort_values(
+            by="PI", ignore_index=True
+        )
+
+        self.assertTrue(output_invoice.equals(answer_invoice))
+        self.assertTrue(output_old_pi_df.equals(answer_old_pi_df))
+
+    def _get_test_invoice(
+        self, pi, cost, su_type=None, is_billable=None, missing_pi=None
+    ):
+        if not su_type:
+            su_type = ["CPU" for _ in range(len(pi))]
+
+        if not is_billable:
+            is_billable = [True for _ in range(len(pi))]
+
+        if not missing_pi:
+            missing_pi = [False for _ in range(len(pi))]
+
+        return pandas.DataFrame(
+            {
+                "Manager (PI)": pi,
+                "Cost": cost,
+                "SU Type": su_type,
+                "Is Billable": is_billable,
+                "Missing PI": missing_pi,
+            }
+        )
+
+    def setUp(self) -> None:
+        self.test_old_pi_file = tempfile.NamedTemporaryFile(
             delete=False, mode="w+", suffix=".csv"
         )
-        for pi in old_pi:
-            old_pi_file.write(pi + "\n")
-        self.old_pi_file = old_pi_file.name
 
-        self.dataframe_no_gpu = pandas.DataFrame(
+    def tearDown(self) -> None:
+        os.remove(self.test_old_pi_file.name)
+
+    def test_no_new_pi(self):
+        test_invoice = self._get_test_invoice(
+            ["PI" for _ in range(3)], [100 for _ in range(3)]
+        )
+
+        # Other fields of old PI file not accessed if PI is no longer
+        # eligible for new-PI credit
+        test_old_pi_df = pandas.DataFrame(
             {
-                "Invoice Month": [
-                    "2024-03",
-                    "2024-03",
-                    "2024-03",
-                    "2024-03",
-                    "2024-03",
-                ],
-                "Manager (PI)": ["PI1", "PI1", "PI1", "PI2", "PI2"],
-                "SU Type": [
-                    "GPU",
-                    "OpenShift GPUA100SXM4",
-                    "OpenStack GPUA100SXM4",
-                    "OpenShift GPUA100SXM4",
-                    "OpenStack GPUA100SXM4",
-                ],
-                "Cost": [500, 100, 100, 500, 500],
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-01"],
+                "Initial Credits": [1000],
             }
         )
-        self.dataframe_no_gpu["Credit"] = None
-        self.dataframe_no_gpu["Credit Code"] = None
-        self.dataframe_no_gpu["Balance"] = self.dataframe_no_gpu["Cost"]
-        old_pi_no_gpu = [
-            "PI,First Invoice Month,Initial Credits,1st Month Used,2nd Month Used",
-            "OldPI,2024-03,500,200,0",
-        ]
-        old_pi_no_gpu_file = tempfile.NamedTemporaryFile(
-            delete=False, mode="w", suffix=".csv"
+        test_old_pi_df.to_csv(self.test_old_pi_file.name, index=False)
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [None for _ in range(3)],
+                        "Credit Code": [None for _ in range(3)],
+                        "PI Balance": [100 for _ in range(3)],
+                        "Balance": [100 for _ in range(3)],
+                    }
+                ),
+            ],
+            axis=1,
         )
-        for pi in old_pi_no_gpu:
-            old_pi_no_gpu_file.write(pi + "\n")
-        self.old_pi_no_gpu_file = old_pi_no_gpu_file.name
-        self.no_gpu_df_answer = pandas.DataFrame(
+
+        answer_old_pi_df = test_old_pi_df.copy()
+
+        self._assert_result_invoice_and_old_pi_file(
+            "2024-06",
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
+
+    def test_one_new_pi(self):
+        """Invoice with one completely new PI"""
+
+        # One allocation
+        invoice_month = "2024-06"
+
+        test_invoice = self._get_test_invoice(["PI"], [100])
+
+        test_old_pi_df = pandas.DataFrame(
+            columns=[
+                "PI",
+                "First Invoice Month",
+                "Initial Credits",
+                "1st Month Used",
+                "2nd Month Used",
+            ]
+        )
+        test_old_pi_df.to_csv(self.test_old_pi_file.name, index=False)
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [100],
+                        "Credit Code": ["0002"],
+                        "PI Balance": [0],
+                        "Balance": [0],
+                    }
+                ),
+            ],
+            axis=1,
+        )
+
+        answer_old_pi_df = pandas.DataFrame(
             {
-                "Invoice Month": [
-                    "2024-03",
-                    "2024-03",
-                    "2024-03",
-                    "2024-03",
-                    "2024-03",
-                ],
-                "Manager (PI)": ["PI1", "PI1", "PI1", "PI2", "PI2"],
-                "SU Type": [
-                    "GPU",
-                    "OpenShift GPUA100SXM4",
-                    "OpenStack GPUA100SXM4",
-                    "OpenShift GPUA100SXM4",
-                    "OpenStack GPUA100SXM4",
-                ],
-                "Cost": [500, 100, 100, 500, 500],
-                "Credit": [500, None, None, None, None],
-                "Credit Code": ["0002", None, None, None, None],
-                "Balance": [0.0, 100.0, 100.0, 500.0, 500.0],
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [100],
+                "2nd Month Used": [0],
             }
         )
 
-    def tearDown(self):
-        os.remove(self.old_pi_file)
-        os.remove(self.old_pi_no_gpu_file)
-
-    def test_apply_credit_0002(self):
-        test_invoice = test_utils.new_billable_invoice(invoice_month="2024-03")
-        old_pi_df = test_invoice._load_old_pis(self.old_pi_file)
-        dataframe, updated_old_pi_df = test_invoice._apply_credits_new_pi(
-            self.dataframe, old_pi_df
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
         )
-        dataframe = dataframe.astype({"Credit": "float64", "Balance": "int64"})
-        updated_old_pi_df = updated_old_pi_df.astype(
-            dtype={
-                "Initial Credits": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                "1st Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-                "2nd Month Used": pandas.ArrowDtype(pyarrow.decimal128(21, 2)),
-            },
-        ).sort_values(by=["PI"], ignore_index=True)
-        self.assertTrue(self.answer_dataframe.equals(dataframe))
-        self.assertTrue(self.old_pi_df_answer.equals(updated_old_pi_df))
 
-    def test_no_gpu(self):
-        test_invoice = test_utils.new_billable_invoice(invoice_month="2024-03")
-        old_pi_df = test_invoice._load_old_pis(self.old_pi_no_gpu_file)
-        dataframe, _ = test_invoice._apply_credits_new_pi(
-            self.dataframe_no_gpu, old_pi_df
+        # Two allocations, costs partially covered
+        test_invoice = self._get_test_invoice(["PI", "PI"], [500, 1000])
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [500, 500],
+                        "Credit Code": ["0002", "0002"],
+                        "PI Balance": [0, 500],
+                        "Balance": [0, 500],
+                    }
+                ),
+            ],
+            axis=1,
         )
-        dataframe = dataframe.astype({"Credit": "float64", "Balance": "float64"})
-        self.assertTrue(self.no_gpu_df_answer.equals(dataframe))
+
+        answer_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [1000],
+                "2nd Month Used": [0],
+            }
+        )
+
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
+
+        # Two allocations, costs completely covered
+        test_invoice = self._get_test_invoice(["PI", "PI"], [500, 400])
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [500, 400],
+                        "Credit Code": ["0002", "0002"],
+                        "PI Balance": [0, 0],
+                        "Balance": [0, 0],
+                    }
+                ),
+            ],
+            axis=1,
+        )
+
+        answer_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [900],
+                "2nd Month Used": [0],
+            }
+        )
+
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
+
+    def test_one_month_pi(self):
+        """PI has appeared in invoices for one month"""
+
+        # Remaining credits completely covers costs
+        invoice_month = "2024-07"
+        test_invoice = self._get_test_invoice(["PI"], [200])
+
+        test_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [500],
+                "2nd Month Used": [0],
+            }
+        )
+        test_old_pi_df.to_csv(self.test_old_pi_file.name, index=False)
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [200],
+                        "Credit Code": ["0002"],
+                        "PI Balance": [0],
+                        "Balance": [0],
+                    }
+                ),
+            ],
+            axis=1,
+        )
+
+        answer_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [500],
+                "2nd Month Used": [200],
+            }
+        )
+
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
+
+        # Remaining credits partially covers costs
+        test_invoice = self._get_test_invoice(["PI"], [600])
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [500],
+                        "Credit Code": ["0002"],
+                        "PI Balance": [100],
+                        "Balance": [100],
+                    }
+                ),
+            ],
+            axis=1,
+        )
+
+        answer_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [500],
+                "2nd Month Used": [500],
+            }
+        )
+
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
+
+    def test_two_new_pi(self):
+        """Two PIs of different age"""
+
+        # Costs partially and completely covered
+        invoice_month = "2024-07"
+        test_invoice = self._get_test_invoice(["PI1", "PI1", "PI2"], [800, 500, 500])
+
+        test_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI1"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [500],
+                "2nd Month Used": [0],
+            }
+        )
+        test_old_pi_df.to_csv(self.test_old_pi_file.name, index=False)
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [500, None, 500],
+                        "Credit Code": ["0002", None, "0002"],
+                        "PI Balance": [300, 500, 0],
+                        "Balance": [300, 500, 0],
+                    }
+                ),
+            ],
+            axis=1,
+        )
+
+        answer_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI1", "PI2"],
+                "First Invoice Month": ["2024-06", "2024-07"],
+                "Initial Credits": [1000, 1000],
+                "1st Month Used": [500, 500],
+                "2nd Month Used": [500, 0],
+            }
+        )
+
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
+
+    def test_old_pi_file_overwritten(self):
+        """If PI already has entry in Old PI file,
+        their initial credits and PI entry could be overwritten"""
+
+        invoice_month = "2024-06"
+        test_invoice = self._get_test_invoice(["PI", "PI"], [500, 500])
+        test_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [500],
+                "1st Month Used": [200],
+                "2nd Month Used": [0],
+            }
+        )
+        test_old_pi_df.to_csv(self.test_old_pi_file.name, index=False)
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [500, None],
+                        "Credit Code": ["0002", None],
+                        "PI Balance": [0, 500],
+                        "Balance": [0, 500],
+                    }
+                ),
+            ],
+            axis=1,
+        )
+
+        answer_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [500],
+                "1st Month Used": [500],
+                "2nd Month Used": [0],
+            }
+        )
+
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
+
+    def test_excluded_su_types(self):
+        """Certain SU types can be excluded from the credit"""
+
+        invoice_month = "2024-06"
+        test_invoice = self._get_test_invoice(
+            ["PI", "PI", "PI", "PI"],
+            [600, 600, 600, 600],
+            [
+                "CPU",
+                "OpenShift GPUA100SXM4",
+                "GPU",
+                "OpenStack GPUA100SXM4",
+            ],
+        )
+
+        test_old_pi_df = pandas.DataFrame(
+            columns=[
+                "PI",
+                "First Invoice Month",
+                "Initial Credits",
+                "1st Month Used",
+                "2nd Month Used",
+            ]
+        )
+        test_old_pi_df.to_csv(self.test_old_pi_file.name, index=False)
+
+        answer_invoice = pandas.concat(
+            [
+                test_invoice,
+                pandas.DataFrame(
+                    {
+                        "Credit": [600, None, 400, None],
+                        "Credit Code": ["0002", None, "0002", None],
+                        "PI Balance": [0, 600, 200, 600],
+                        "Balance": [0, 600, 200, 600],
+                    }
+                ),
+            ],
+            axis=1,
+        )
+
+        answer_old_pi_df = pandas.DataFrame(
+            {
+                "PI": ["PI"],
+                "First Invoice Month": ["2024-06"],
+                "Initial Credits": [1000],
+                "1st Month Used": [1000],
+                "2nd Month Used": [0],
+            }
+        )
+
+        self._assert_result_invoice_and_old_pi_file(
+            invoice_month,
+            test_invoice,
+            self.test_old_pi_file.name,
+            answer_invoice,
+            answer_old_pi_df,
+        )
 
     def test_apply_credit_error(self):
+        """Test faulty data"""
         old_pi_df = pandas.DataFrame(
             {"PI": ["PI1"], "First Invoice Month": ["2024-04"]}
         )
         invoice_month = "2024-03"
-        test_invoice = test_utils.new_billable_invoice()
+        test_invoice = test_utils.new_new_pi_credit_processor()
         with self.assertRaises(SystemExit):
             test_invoice._get_pi_age(old_pi_df, "PI1", invoice_month)
 
 
-class TestBUSubsidy(TestCase):
-    def setUp(self):
-        data = {
-            "Invoice Month": [
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-            ],
-            "Manager (PI)": ["PI1", "PI1", "PI2", "PI2", "PI3", "PI3", "PI4", "PI4"],
-            "Institution": [
+class TestBUSubsidyProcessor(TestCase):
+    def _assert_result_invoice(
+        self,
+        subsidy_amount,
+        test_invoice,
+        answer_invoice,
+        invoice_month="0000-00",
+    ):
+        new_bu_subsidy_proc = test_utils.new_bu_subsidy_processor(
+            invoice_month=invoice_month,
+            data=test_invoice,
+            subsidy_amount=subsidy_amount,
+        )
+        new_bu_subsidy_proc.process()
+        output_invoice = new_bu_subsidy_proc.data
+        answer_invoice = answer_invoice.astype(output_invoice.dtypes)
+        print(output_invoice)
+        print(answer_invoice)
+
+        self.assertTrue(output_invoice.equals(answer_invoice))
+
+    def _get_test_invoice(
+        self,
+        pi,
+        pi_balances,
+        balances=None,
+        project_names=None,
+        institution=None,
+        is_billable=None,
+        missing_pi=None,
+    ):
+        if not balances:
+            balances = pi_balances
+
+        if not project_names:
+            project_names = ["Project" for _ in range(len(pi))]
+
+        if not institution:
+            institution = ["Boston University" for _ in range(len(pi))]
+
+        if not is_billable:
+            is_billable = [True for _ in range(len(pi))]
+
+        if not missing_pi:
+            missing_pi = [False for _ in range(len(pi))]
+
+        return pandas.DataFrame(
+            {
+                "Manager (PI)": pi,
+                "Project - Allocation": project_names,
+                "PI Balance": pi_balances,
+                "Balance": balances,
+                "Institution": institution,
+                "Is Billable": is_billable,
+                "Missing PI": missing_pi,
+            }
+        )
+
+    def test_exclude_non_BU_pi(self):
+        """Are only BU PIs given the subsidy?"""
+
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            [str(i) for i in range(5)],
+            pi_balances=[subsidy_amount for _ in range(5)],
+            institution=[
                 "Boston University",
                 "Boston University",
-                "Boston University",
-                "Boston University",
-                "Harvard University",  # Test case for non-BU PIs
+                "boston university",
                 "Harvard University",
-                "Boston University",
-                "Boston University",
+                "BU",
             ],
-            "Project - Allocation": [
-                "ProjectA-e6413",
-                "ProjectA-t575e6",  # Test case for project with >1 allocation
-                "ProjectB-fddgfygg",
-                "ProjectB-5t143t",
-                "ProjectC-t14334",
-                "ProjectD",  # Test case for correctly extracting project name
-                "ProjectE-test-r25135",  # Test case for BU PI with >1 project
-                "ProjectF",
-            ],
-            "Cost": [1050, 500, 100, 925, 10000, 1000, 1050, 100],
-            "Credit": [
-                1000,
-                0,
-                100,
-                900,
-                0,
-                0,
-                1000,
-                0,
-            ],  # Test cases where PI does/dones't have credits alreadys
-            "Balance": [
-                50,
-                500,
-                0,
-                25,
-                10000,
-                1000,
-                50,
-                100,
-            ],  # Test case where subsidy does/doesn't cover fully balance
-        }
-        self.dataframe = pandas.DataFrame(data)
-        self.subsidy = 100
-
-    def test_apply_BU_subsidy(self):
-        test_invoice = test_utils.new_bu_internal_invoice(
-            data=self.dataframe, subsidy_amount=self.subsidy
-        )
-        test_invoice.process()
-        output_df = test_invoice.data.reset_index()
-
-        self.assertTrue(
-            set(
-                [
-                    process_report.INVOICE_DATE_FIELD,
-                    "Project",
-                    process_report.PI_FIELD,
-                    process_report.COST_FIELD,
-                    process_report.CREDIT_FIELD,
-                    process_report.SUBSIDY_FIELD,
-                    process_report.BALANCE_FIELD,
-                ]
-            ).issubset(output_df)
         )
 
-        self.assertTrue(
-            set(["PI1", "PI2", "PI4"]).issubset(output_df["Manager (PI)"].unique())
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [subsidy_amount, subsidy_amount, 0, 0, 0]
+        answer_invoice["PI Balance"] = [
+            0,
+            0,
+            subsidy_amount,
+            subsidy_amount,
+            subsidy_amount,
+        ]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+    def test_exclude_nonbillables(self):
+        """Are nonbillables excluded from the subsidy?"""
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            [str(i) for i in range(6)],
+            pi_balances=[subsidy_amount for _ in range(6)],
+            is_billable=[True, True, False, False, True, True],
+            missing_pi=[True, True, False, False, False, False],
         )
-        self.assertFalse("PI3" in output_df["Project"].unique())
 
-        self.assertTrue(
-            set(["ProjectA", "ProjectB", "ProjectE-test", "ProjectF"]).issubset(
-                output_df["Project"].unique()
-            )
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [0, 0, 0, 0, subsidy_amount, subsidy_amount]
+        answer_invoice["PI Balance"] = [
+            subsidy_amount,
+            subsidy_amount,
+            subsidy_amount,
+            subsidy_amount,
+            0,
+            0,
+        ]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+    def test_one_pi_many_allocations(self):
+        """Is subsidy applied properly to BU PI with many allocations?"""
+
+        # Two projects, one allocation each
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            ["PI" for i in range(2)],
+            pi_balances=[60, 60],
+            project_names=["P1", "P2"],
         )
-        self.assertFalse(
-            set(["ProjectC-t14334", "ProjectC", "ProjectD"]).intersection(
-                output_df["Project"].unique()
-            )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [60, 40]
+        answer_invoice["PI Balance"] = [0, 20]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+        # Two projects, two allocations each
+        test_invoice = self._get_test_invoice(
+            ["PI" for i in range(4)],
+            pi_balances=[40, 40, 40, 40],
+            project_names=["P1-A1", "P1-A1-test", "P2", "P2-"],
         )
 
-        self.assertEqual(4, len(output_df.index))
-        self.assertEqual(1550, output_df.loc[0, "Cost"])
-        self.assertEqual(1025, output_df.loc[1, "Cost"])
-        self.assertEqual(1050, output_df.loc[2, "Cost"])
-        self.assertEqual(100, output_df.loc[3, "Cost"])
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = ["P1", "P1-A1", "P2", "P2"]
+        answer_invoice["Subsidy"] = [40, 40, 20, 0]
+        answer_invoice["PI Balance"] = [0, 0, 20, 40]
 
-        self.assertEqual(100, output_df.loc[0, "Subsidy"])
-        self.assertEqual(25, output_df.loc[1, "Subsidy"])
-        self.assertEqual(50, output_df.loc[2, "Subsidy"])
-        self.assertEqual(50, output_df.loc[3, "Subsidy"])
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
 
-        self.assertEqual(450, output_df.loc[0, "Balance"])
-        self.assertEqual(0, output_df.loc[1, "Balance"])
-        self.assertEqual(0, output_df.loc[2, "Balance"])
-        self.assertEqual(50, output_df.loc[3, "Balance"])
+        # Two allocations, one where PI balance != NERC balance
+        test_invoice = self._get_test_invoice(
+            ["PI" for i in range(2)],
+            pi_balances=[80, 80],
+            project_names=["P1", "P2"],
+            balances=[100, 80],
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [80, 20]
+        answer_invoice["PI Balance"] = [0, 60]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+    def test_two_pi(self):
+        """Is subsidy applied to more than one PI?"""
+        # Each PI has two allocations
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            ["PI1", "PI1", "PI2", "PI2"],
+            pi_balances=[80, 80, 40, 40],
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [80, 20, 40, 40]
+        answer_invoice["PI Balance"] = [0, 60, 0, 0]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
 
 
 class TestLenovoProcessor(TestCase):
@@ -768,24 +1010,24 @@ class TestNERCRates(TestCase):
                 "Institution": ["BU", "HU", "NEU", "MIT", "BC"],
             }
         )
-        sample_inv = test_utils.new_billable_invoice(
+        sample_proc = test_utils.new_new_pi_credit_processor(
             limit_new_pi_credit_to_partners=True
         )
 
         # When no partnerships are active
-        sample_inv.invoice_month = "2024-01"
-        output_df = sample_inv._filter_partners(sample_df)
+        sample_proc.invoice_month = "2024-01"
+        output_df = sample_proc._filter_partners(sample_df)
         self.assertTrue(output_df.empty)
 
         # When some partnerships are active
-        sample_inv.invoice_month = "2024-06"
-        output_df = sample_inv._filter_partners(sample_df)
+        sample_proc.invoice_month = "2024-06"
+        output_df = sample_proc._filter_partners(sample_df)
         answer_df = pandas.DataFrame({"Institution": ["BU", "HU"]})
         self.assertTrue(output_df.equals(answer_df))
 
         # When all partnerships are active
-        sample_inv.invoice_month = "2024-12"
-        output_df = sample_inv._filter_partners(sample_df)
+        sample_proc.invoice_month = "2024-12"
+        output_df = sample_proc._filter_partners(sample_df)
         answer_df = pandas.DataFrame({"Institution": ["BU", "HU", "NEU"]})
         self.assertTrue(output_df.equals(answer_df))
 
@@ -794,9 +1036,11 @@ class TestBaseInvoice(TestCase):
     def test_filter_exported_columns(self):
         test_invoice = pandas.DataFrame(columns=["C1", "C2", "C3", "C4", "C5"])
         answer_invoice = pandas.DataFrame(columns=["C1", "C3R", "C5R"])
-        inv = test_utils.new_base_invoice(data=test_invoice)
+        inv = test_utils.new_base_invoice()
+        inv.export_data = test_invoice
         inv.export_columns_list = ["C1", "C3", "C5"]
         inv.exported_columns_map = {"C3": "C3R", "C5": "C5R"}
-        result_invoice = inv._filter_columns()
 
+        inv._filter_columns()
+        result_invoice = inv.export_data
         self.assertTrue(result_invoice.equals(answer_invoice))

@@ -36,6 +36,8 @@ BALANCE_FIELD = "Balance"
 ### Internally used field names
 IS_BILLABLE_FIELD = "Is Billable"
 MISSING_PI_FIELD = "Missing PI"
+PI_BALANCE_FIELD = "PI Balance"
+PROJECT_NAME_FIELD = "Project"
 ###
 
 
@@ -47,6 +49,7 @@ class Invoice:
     name: str
     invoice_month: str
     data: pandas.DataFrame
+    export_data = None
 
     def process(self):
         self._prepare()
@@ -91,13 +94,13 @@ class Invoice:
 
     def _filter_columns(self):
         """Filters and renames columns before exporting"""
-        return self.data.copy()[self.export_columns_list].rename(
+        self.export_data = self.export_data[self.export_columns_list].rename(
             columns=self.exported_columns_map
         )
 
     def export(self):
-        export_data = self._filter_columns()
-        export_data.to_csv(self.output_path, index=False)
+        self._filter_columns()
+        self.export_data.to_csv(self.output_path, index=False)
 
     def export_s3(self, s3_bucket):
         s3_bucket.upload_file(self.output_path, self.output_s3_key)
