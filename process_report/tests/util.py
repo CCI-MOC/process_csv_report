@@ -3,7 +3,6 @@ import pandas
 from process_report.invoices import (
     invoice,
     billable_invoice,
-    bu_internal_invoice,
     pi_specific_invoice,
 )
 
@@ -13,6 +12,7 @@ from process_report.processors import (
     lenovo_processor,
     validate_billable_pi_processor,
     new_pi_credit_processor,
+    bu_subsidy_processor,
 )
 
 
@@ -47,16 +47,6 @@ def new_billable_invoice(
         data,
         old_pi_filepath,
         updated_old_pi_df,
-    )
-
-
-def new_bu_internal_invoice(
-    name="", invoice_month="0000-00", data=None, subsidy_amount=0
-):
-    if data is None:
-        data = pandas.DataFrame()
-    return bu_internal_invoice.BUInternalInvoice(
-        name, invoice_month, data, subsidy_amount
     )
 
 
@@ -136,4 +126,17 @@ def new_new_pi_credit_processor(
         data = pandas.DataFrame()
     return new_pi_credit_processor.NewPICreditProcessor(
         name, invoice_month, data, old_pi_filepath, limit_new_pi_credit_to_partners
+    )
+
+
+def new_bu_subsidy_processor(
+    name="",
+    invoice_month="0000-00",
+    data=None,
+    subsidy_amount=0,
+):
+    if data is None:
+        data = pandas.DataFrame()
+    return bu_subsidy_processor.BUSubsidyProcessor(
+        name, invoice_month, data, subsidy_amount
     )
