@@ -30,7 +30,11 @@ class NERCTotalInvoice(invoice.Invoice):
         invoice.SU_HOURS_FIELD,
         invoice.SU_TYPE_FIELD,
         invoice.RATE_FIELD,
+        invoice.GROUP_NAME_FIELD,
+        invoice.GROUP_INSTITUTION_FIELD,
+        invoice.GROUP_BALANCE_FIELD,
         invoice.COST_FIELD,
+        invoice.GROUP_BALANCE_USED_FIELD,
         invoice.CREDIT_FIELD,
         invoice.CREDIT_CODE_FIELD,
         invoice.BALANCE_FIELD,
@@ -56,4 +60,5 @@ class NERCTotalInvoice(invoice.Invoice):
         ]
         self.data = self.data[
             self.data[invoice.INSTITUTION_FIELD].isin(self.INCLUDED_INSTITUTIONS)
+            | (self.data[invoice.GROUP_MANAGED_FIELD] == True)  # noqa E712
         ].copy()
