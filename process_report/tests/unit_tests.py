@@ -157,7 +157,7 @@ class TestExportPICSV(TestCase):
         self.assertNotIn("ProjectC", pi_df["Project - Allocation"].tolist())
 
 
-class TestAddInstituteProcessor(TestCase):
+class TestAddInstitute(TestCase):
     def test_get_pi_institution(self):
         institute_map = {
             "harvard.edu": "Harvard University",
@@ -186,12 +186,9 @@ class TestAddInstituteProcessor(TestCase):
             "g@bidmc.harvard.edu": "Beth Israel Deaconess Medical Center",
         }
 
-        add_institute_proc = test_utils.new_add_institution_processor()
-
         for pi_email, answer in answers.items():
             self.assertEqual(
-                add_institute_proc._get_institution_from_pi(institute_map, pi_email),
-                answer,
+                util.get_institution_from_pi(institute_map, pi_email), answer
             )
 
 
@@ -757,119 +754,583 @@ class TestNewPICreditProcessor(TestCase):
             test_invoice._get_pi_age(old_pi_df, "PI1", invoice_month)
 
 
-class TestBUSubsidy(TestCase):
-    def setUp(self):
-        data = {
-            "Invoice Month": [
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-                "2024-03",
-            ],
-            "Manager (PI)": ["PI1", "PI1", "PI2", "PI2", "PI3", "PI3", "PI4", "PI4"],
-            "Institution": [
+class TestBUSubsidyProcessor(TestCase):
+    def _assert_result_invoice(
+        self,
+        subsidy_amount,
+        test_invoice,
+        answer_invoice,
+        invoice_month="0000-00",
+    ):
+        new_bu_subsidy_proc = test_utils.new_bu_subsidy_processor(
+            invoice_month=invoice_month,
+            data=test_invoice,
+            subsidy_amount=subsidy_amount,
+        )
+        new_bu_subsidy_proc.process()
+        output_invoice = new_bu_subsidy_proc.data
+        answer_invoice = answer_invoice.astype(output_invoice.dtypes)
+        print(output_invoice)
+        print(answer_invoice)
+
+        self.assertTrue(output_invoice.equals(answer_invoice))
+
+    def _get_test_invoice(
+        self,
+        pi,
+        pi_balances,
+        balances=None,
+        project_names=None,
+        institution=None,
+        is_billable=None,
+        missing_pi=None,
+    ):
+        if not balances:
+            balances = pi_balances
+
+        if not project_names:
+            project_names = ["Project" for _ in range(len(pi))]
+
+        if not institution:
+            institution = ["Boston University" for _ in range(len(pi))]
+
+        if not is_billable:
+            is_billable = [True for _ in range(len(pi))]
+
+        if not missing_pi:
+            missing_pi = [False for _ in range(len(pi))]
+
+        return pandas.DataFrame(
+            {
+                "Manager (PI)": pi,
+                "Project - Allocation": project_names,
+                "PI Balance": pi_balances,
+                "Balance": balances,
+                "Institution": institution,
+                "Is Billable": is_billable,
+                "Missing PI": missing_pi,
+            }
+        )
+
+    def test_exclude_non_BU_pi(self):
+        """Are only BU PIs given the subsidy?"""
+
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            [str(i) for i in range(5)],
+            pi_balances=[subsidy_amount for _ in range(5)],
+            institution=[
                 "Boston University",
                 "Boston University",
-                "Boston University",
-                "Boston University",
-                "Harvard University",  # Test case for non-BU PIs
+                "boston university",
                 "Harvard University",
-                "Boston University",
-                "Boston University",
+                "BU",
             ],
-            "Project - Allocation": [
-                "ProjectA-e6413",
-                "ProjectA-t575e6",  # Test case for project with >1 allocation
-                "ProjectB-fddgfygg",
-                "ProjectB-5t143t",
-                "ProjectC-t14334",
-                "ProjectD",  # Test case for correctly extracting project name
-                "ProjectE-test-r25135",  # Test case for BU PI with >1 project
-                "ProjectF",
-            ],
-            "Cost": [1050, 500, 100, 925, 10000, 1000, 1050, 100],
-            "Credit": [
-                1000,
-                0,
-                100,
-                900,
-                0,
-                0,
-                1000,
-                0,
-            ],  # Test cases where PI does/dones't have credits alreadys
-            "Balance": [
-                50,
-                500,
-                0,
-                25,
-                10000,
-                1000,
-                50,
-                100,
-            ],  # Test case where subsidy does/doesn't cover fully balance
-            "Is Billable": [True, True, True, True, True, True, True, True],
-            "Missing PI": [False, False, False, False, False, False, False, False],
-        }
-        self.dataframe = pandas.DataFrame(data)
-        self.subsidy = 100
-
-    def test_apply_BU_subsidy(self):
-        test_invoice = test_utils.new_bu_internal_invoice(
-            data=self.dataframe, subsidy_amount=self.subsidy
-        )
-        test_invoice.process()
-        output_df = test_invoice.data.reset_index()
-
-        self.assertTrue(
-            set(
-                [
-                    process_report.INVOICE_DATE_FIELD,
-                    "Project",
-                    process_report.PI_FIELD,
-                    process_report.COST_FIELD,
-                    process_report.CREDIT_FIELD,
-                    process_report.SUBSIDY_FIELD,
-                    process_report.BALANCE_FIELD,
-                ]
-            ).issubset(output_df)
         )
 
-        self.assertTrue(
-            set(["PI1", "PI2", "PI4"]).issubset(output_df["Manager (PI)"].unique())
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [subsidy_amount, subsidy_amount, 0, 0, 0]
+        answer_invoice["PI Balance"] = [
+            0,
+            0,
+            subsidy_amount,
+            subsidy_amount,
+            subsidy_amount,
+        ]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+    def test_exclude_nonbillables(self):
+        """Are nonbillables excluded from the subsidy?"""
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            [str(i) for i in range(6)],
+            pi_balances=[subsidy_amount for _ in range(6)],
+            is_billable=[True, True, False, False, True, True],
+            missing_pi=[True, True, False, False, False, False],
         )
-        self.assertFalse("PI3" in output_df["Project"].unique())
 
-        self.assertTrue(
-            set(["ProjectA", "ProjectB", "ProjectE-test", "ProjectF"]).issubset(
-                output_df["Project"].unique()
-            )
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [0, 0, 0, 0, subsidy_amount, subsidy_amount]
+        answer_invoice["PI Balance"] = [
+            subsidy_amount,
+            subsidy_amount,
+            subsidy_amount,
+            subsidy_amount,
+            0,
+            0,
+        ]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+    def test_one_pi_many_allocations(self):
+        """Is subsidy applied properly to BU PI with many allocations?"""
+
+        # Two projects, one allocation each
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            ["PI" for i in range(2)],
+            pi_balances=[60, 60],
+            project_names=["P1", "P2"],
         )
-        self.assertFalse(
-            set(["ProjectC-t14334", "ProjectC", "ProjectD"]).intersection(
-                output_df["Project"].unique()
-            )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [60, 40]
+        answer_invoice["PI Balance"] = [0, 20]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+        # Two projects, two allocations each
+        test_invoice = self._get_test_invoice(
+            ["PI" for i in range(4)],
+            pi_balances=[40, 40, 40, 40],
+            project_names=["P1-A1", "P1-A1-test", "P2", "P2-"],
         )
 
-        self.assertEqual(4, len(output_df.index))
-        self.assertEqual(1550, output_df.loc[0, "Cost"])
-        self.assertEqual(1025, output_df.loc[1, "Cost"])
-        self.assertEqual(1050, output_df.loc[2, "Cost"])
-        self.assertEqual(100, output_df.loc[3, "Cost"])
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = ["P1", "P1-A1", "P2", "P2"]
+        answer_invoice["Subsidy"] = [40, 40, 20, 0]
+        answer_invoice["PI Balance"] = [0, 0, 20, 40]
 
-        self.assertEqual(100, output_df.loc[0, "Subsidy"])
-        self.assertEqual(25, output_df.loc[1, "Subsidy"])
-        self.assertEqual(50, output_df.loc[2, "Subsidy"])
-        self.assertEqual(50, output_df.loc[3, "Subsidy"])
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
 
-        self.assertEqual(450, output_df.loc[0, "Balance"])
-        self.assertEqual(0, output_df.loc[1, "Balance"])
-        self.assertEqual(0, output_df.loc[2, "Balance"])
-        self.assertEqual(50, output_df.loc[3, "Balance"])
+        # Two allocations, one where PI balance != NERC balance
+        test_invoice = self._get_test_invoice(
+            ["PI" for i in range(2)],
+            pi_balances=[80, 80],
+            project_names=["P1", "P2"],
+            balances=[100, 80],
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [80, 20]
+        answer_invoice["PI Balance"] = [0, 60]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+    def test_two_pi(self):
+        """Is subsidy applied to more than one PI?"""
+        # Each PI has two allocations
+        subsidy_amount = 100
+        test_invoice = self._get_test_invoice(
+            ["PI1", "PI1", "PI2", "PI2"],
+            pi_balances=[80, 80, 40, 40],
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Project"] = answer_invoice["Project - Allocation"]
+        answer_invoice["Subsidy"] = [80, 20, 40, 40]
+        answer_invoice["PI Balance"] = [0, 60, 0, 0]
+
+        self._assert_result_invoice(subsidy_amount, test_invoice, answer_invoice)
+
+
+class TestPrepaymentProcessor(TestCase):
+    def _assert_result_invoice(
+        self,
+        test_invoice,
+        test_prepay_credits,
+        test_prepay_debits_filepath,
+        test_prepay_projects,
+        test_prepay_contacts,
+        answer_invoice,
+        answer_prepay_debits,
+        invoice_month="0000-00",
+    ):
+        new_prepayment_proc = test_utils.new_prepayment_processor(
+            "",
+            invoice_month,
+            test_invoice,
+            test_prepay_credits,
+            test_prepay_debits_filepath,
+            test_prepay_projects,
+            test_prepay_contacts,
+        )
+        new_prepayment_proc.process()
+        output_invoice = new_prepayment_proc.data
+        output_prepay_debits = new_prepayment_proc.prepay_debits.sort_values(
+            by="Month", ignore_index=True
+        )
+
+        answer_invoice = answer_invoice.astype(output_invoice.dtypes)
+        answer_prepay_debits = answer_prepay_debits.astype(
+            output_prepay_debits.dtypes
+        ).sort_values(by="Month", ignore_index=True)
+
+        self.assertTrue(output_invoice.equals(answer_invoice))
+        self.assertTrue(output_prepay_debits.equals(answer_prepay_debits))
+
+    def _get_test_invoice(self, project_names, pi_balances, balances=None):
+        if not balances:
+            balances = pi_balances
+
+        return pandas.DataFrame(
+            {
+                "Project": project_names,
+                "PI Balance": pi_balances,
+                "Balance": balances,
+                "Invoice Email": [None] * len(project_names),
+            }
+        )
+
+    def _get_test_prepay_credits(self, months, group_names, credits):
+        return pandas.DataFrame(
+            {"Month": months, "Group Name": group_names, "Credit": credits}
+        )
+
+    def _get_test_prepay_debits(self, months, group_names, debits):
+        return pandas.DataFrame(
+            {"Month": months, "Group Name": group_names, "Debit": debits}
+        )
+
+    def _get_test_prepay_projects(
+        self, group_names, project_names, start_dates, end_dates
+    ):
+        return pandas.DataFrame(
+            {
+                "Group Name": group_names,
+                "Project": project_names,
+                "Start Date": start_dates,
+                "End Date": end_dates,
+            }
+        )
+
+    def _get_test_prepay_contacts(self, group_names, emails, is_managed):
+        return pandas.DataFrame(
+            {
+                "Group Name": group_names,
+                "Group Contact Email": emails,
+                "MGHPCC Managed": is_managed,
+            }
+        )
+
+    def setUp(self) -> None:
+        self.test_prepay_debits_file = tempfile.NamedTemporaryFile(
+            delete=False, mode="w+", suffix=".csv"
+        )
+
+    def tearDown(self) -> None:
+        os.remove(self.test_prepay_debits_file.name)
+
+    def test_one_group_one_project(self):
+        """Simple one project test and checks idempotentcy"""
+        invoice_month = "2024-10"
+        test_invoice = self._get_test_invoice(["P1"], [1000])
+        test_prepay_credits = self._get_test_prepay_credits(["2024-01"], ["G1"], [1500])
+        test_prepay_debits = self._get_test_prepay_debits([], [], [])
+        test_prepay_debits.to_csv(self.test_prepay_debits_file.name, index=False)
+        test_prepay_projects = self._get_test_prepay_projects(
+            ["G1"], ["P1"], ["2024-09"], ["2024-12"]
+        )
+        test_prepay_contacts = self._get_test_prepay_contacts(
+            ["G1"], ["G1@bu.edu"], [True]
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Prepaid Group Name"] = ["G1"]
+        answer_invoice["Prepaid Group Institution"] = ["Boston University"]
+        answer_invoice["MGHPCC Managed"] = [True]
+        answer_invoice["Prepaid Group Balance"] = [500]
+        answer_invoice["Prepaid Group Used"] = [1000]
+        answer_invoice["Invoice Email"] = ["G1@bu.edu"]
+        answer_invoice["PI Balance"] = [0]
+        answer_invoice["Balance"] = [0]
+
+        answer_prepay_debits = self._get_test_prepay_debits(
+            [invoice_month], ["G1"], [1000]
+        )
+
+        self._assert_result_invoice(
+            test_invoice.copy(),
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+        # Is the output invoice and debits the same if
+        # processor is ran twice with same invoice but updated debits?
+        self._assert_result_invoice(
+            test_invoice,
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+    def test_project_active_periods(self):
+        """How is prepay handled for 2 projects in same group in different billing months?"""
+        # Prepay projects not in active period
+        project_names = ["P1", "P2"]
+
+        invoice_month = "2024-06"
+        test_invoice = self._get_test_invoice(project_names, [1000, 2000])
+        test_prepay_credits = self._get_test_prepay_credits(["2024-04"], ["G1"], [5000])
+        test_prepay_debits = self._get_test_prepay_debits([], [], [])
+        test_prepay_debits.to_csv(self.test_prepay_debits_file.name, index=False)
+        test_prepay_projects = self._get_test_prepay_projects(
+            ["G1", "G1"], project_names, ["2024-08", "2024-10"], ["2024-12", "2025-02"]
+        )
+        test_prepay_contacts = self._get_test_prepay_contacts(
+            ["G1"], ["G1@bu.edu"], [True]
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Prepaid Group Name"] = [None, None]
+        answer_invoice["Prepaid Group Institution"] = [None, None]
+        answer_invoice["MGHPCC Managed"] = [None, None]
+        answer_invoice["Prepaid Group Balance"] = [None, None]
+        answer_invoice["Prepaid Group Used"] = [None, None]
+
+        answer_prepay_debits = test_prepay_debits.copy()
+
+        self._assert_result_invoice(
+            test_invoice.copy(),
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+        # One project in active period
+        invoice_month = "2024-08"
+        answer_invoice["Prepaid Group Name"] = ["G1", None]
+        answer_invoice["Prepaid Group Institution"] = ["Boston University", None]
+        answer_invoice["MGHPCC Managed"] = [True, None]
+        answer_invoice["Prepaid Group Balance"] = [4000, None]
+        answer_invoice["Prepaid Group Used"] = [1000, None]
+        answer_invoice["Invoice Email"] = ["G1@bu.edu", None]
+        answer_invoice["PI Balance"] = [0, 2000]
+        answer_invoice["Balance"] = [0, 2000]
+
+        test_prepay_debits.to_csv(
+            self.test_prepay_debits_file.name, index=False
+        )  # Resetting debit file
+        answer_prepay_debits = self._get_test_prepay_debits(
+            [invoice_month], ["G1"], [1000]
+        )
+
+        self._assert_result_invoice(
+            test_invoice.copy(),
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+        # Both projects in active period
+        invoice_month = "2024-12"
+        answer_invoice["Prepaid Group Name"] = ["G1", "G1"]
+        answer_invoice["Prepaid Group Institution"] = [
+            "Boston University",
+            "Boston University",
+        ]
+        answer_invoice["MGHPCC Managed"] = [True, True]
+        answer_invoice["Prepaid Group Balance"] = [2000, 2000]
+        answer_invoice["Prepaid Group Used"] = [1000, 2000]
+        answer_invoice["Invoice Email"] = ["G1@bu.edu", "G1@bu.edu"]
+        answer_invoice["PI Balance"] = [0, 0]
+        answer_invoice["Balance"] = [0, 0]
+
+        test_prepay_debits.to_csv(self.test_prepay_debits_file.name, index=False)
+        answer_prepay_debits = self._get_test_prepay_debits(
+            [invoice_month], ["G1"], [3000]
+        )
+
+        self._assert_result_invoice(
+            test_invoice.copy(),
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+        # Both projects in active period, but before credits were given
+        test_prepay_credits = self._get_test_prepay_credits(["2026-04"], ["G1"], [5000])
+
+        # Still has group info, but group balance should be 0
+        answer_invoice["Prepaid Group Balance"] = [0, 0]
+        answer_invoice["Prepaid Group Used"] = [None, None]
+        answer_invoice["PI Balance"] = [1000, 2000]
+        answer_invoice["Balance"] = [1000, 2000]
+
+        test_prepay_debits.to_csv(self.test_prepay_debits_file.name, index=False)
+        answer_prepay_debits = self._get_test_prepay_debits([], [], [])
+
+        self._assert_result_invoice(
+            test_invoice.copy(),
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+    def test_one_group_two_project_balances(self):
+        """Different scenarios for 2 projects' balances"""
+        # Prepayment partially covers projects
+        project_names = ["P1", "P2"]
+
+        invoice_month = "2024-10"
+        test_invoice = self._get_test_invoice(project_names, [1000, 2000])
+        test_prepay_credits = self._get_test_prepay_credits(["2024-04"], ["G1"], [1500])
+        test_prepay_debits = self._get_test_prepay_debits([], [], [])
+        test_prepay_debits.to_csv(self.test_prepay_debits_file.name, index=False)
+        test_prepay_projects = self._get_test_prepay_projects(
+            ["G1", "G1"], project_names, ["2024-08", "2024-08"], ["2024-10", "2025-02"]
+        )
+        test_prepay_contacts = self._get_test_prepay_contacts(
+            ["G1"], ["G1@bu.edu"], [True]
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Prepaid Group Name"] = ["G1", "G1"]
+        answer_invoice["Prepaid Group Institution"] = [
+            "Boston University",
+            "Boston University",
+        ]
+        answer_invoice["MGHPCC Managed"] = [True, True]
+        answer_invoice["Prepaid Group Balance"] = [0, 0]
+        answer_invoice["Prepaid Group Used"] = [1000, 500]
+        answer_invoice["Invoice Email"] = ["G1@bu.edu", "G1@bu.edu"]
+        answer_invoice["PI Balance"] = [0, 1500]
+        answer_invoice["Balance"] = [0, 1500]
+
+        answer_prepay_debits = self._get_test_prepay_debits(
+            [invoice_month], ["G1"], [1500]
+        )
+
+        self._assert_result_invoice(
+            test_invoice,
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+        # PI balance != Balance
+        test_invoice = self._get_test_invoice(project_names, [1000, 2000], [2000, 2500])
+
+        answer_invoice["Balance"] = [1000, 2000]
+
+        self._assert_result_invoice(
+            test_invoice,
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+    def test_two_group_one_project(self):
+        """How is prepay handled for two different groups with different credits and debits?"""
+        # Invoice month is before any credits are given
+        project_names = ["G1P1", "G2P1"]
+
+        invoice_month = "2024-03"
+        test_invoice = self._get_test_invoice(project_names, [1000, 2000])
+        test_prepay_credits = self._get_test_prepay_credits(
+            ["2024-04", "2024-04", "2024-06", "2024-08", "2024-10"],
+            ["G1", "G2", "G1", "G2", "G1"],
+            [700, 800, 1000, 2000, 3500],
+        )
+        test_prepay_debits = self._get_test_prepay_debits(
+            ["2024-05", "2024-06", "2024-07", "2024-10"],
+            ["G1", "G2", "G2", "G1"],
+            [200, 300, 1000, 2000],
+        )
+        test_prepay_debits.to_csv(self.test_prepay_debits_file.name, index=False)
+        test_prepay_projects = self._get_test_prepay_projects(
+            ["G1", "G2"], project_names, ["2024-01", "2024-01"], ["2024-12", "2024-12"]
+        )
+        test_prepay_contacts = self._get_test_prepay_contacts(
+            ["G1", "G2"], ["G1@bu.edu", "G2@harvard.edu"], [True, False]
+        )
+
+        answer_invoice = test_invoice.copy()
+        answer_invoice["Prepaid Group Name"] = ["G1", "G2"]
+        answer_invoice["Prepaid Group Institution"] = [
+            "Boston University",
+            "Harvard University",
+        ]
+        answer_invoice["MGHPCC Managed"] = [True, False]
+        answer_invoice["Prepaid Group Balance"] = [0, 0]
+        answer_invoice["Prepaid Group Used"] = [None, None]
+        answer_invoice["Invoice Email"] = ["G1@bu.edu", "G2@harvard.edu"]
+
+        answer_prepay_debits = test_prepay_debits.copy()
+
+        self._assert_result_invoice(
+            test_invoice.copy(),
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
+
+        # Invoice month is after some credits and debits are given, TODO: Waiting for Kim's response
+        invoice_month = "2024-08"
+        answer_invoice["Prepaid Group Balance"] = [4000, 0]
+        answer_invoice["Prepaid Group Used"] = [1000, 1500]
+        answer_invoice["PI Balance"] = [0, 500]
+        answer_invoice["Balance"] = answer_invoice["PI Balance"]
+
+        answer_prepay_debits = self._get_test_prepay_debits(
+            [invoice_month], ["G1"], [1000]
+        )
+
+        # Invoice month after all credits and debits are given. Debit entry should overwritten
+        invoice_month = "2024-10"
+        answer_invoice["Prepaid Group Balance"] = [4000, 0]
+        answer_invoice["Prepaid Group Used"] = [1000, 1500]
+        answer_invoice["PI Balance"] = [0, 500]
+        answer_invoice["Balance"] = answer_invoice["PI Balance"]
+
+        answer_prepay_debits = self._get_test_prepay_debits(
+            ["2024-05", "2024-06", "2024-07", "2024-10", "2024-10"],
+            ["G1", "G2", "G2", "G1", "G2"],
+            [200, 300, 1000, 1000, 1500],
+        )
+
+        self._assert_result_invoice(
+            test_invoice.copy(),
+            test_prepay_credits,
+            self.test_prepay_debits_file.name,
+            test_prepay_projects,
+            test_prepay_contacts,
+            answer_invoice,
+            answer_prepay_debits,
+            invoice_month,
+        )
 
 
 class TestLenovoProcessor(TestCase):
