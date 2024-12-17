@@ -21,6 +21,7 @@ from process_report.processors import (
     lenovo_processor,
     validate_billable_pi_processor,
     new_pi_credit_processor,
+    bu_subsidy_processor,
 )
 
 ### PI file field names
@@ -242,7 +243,12 @@ def main():
     )
     new_pi_credit_proc.process()
 
-    processed_data = new_pi_credit_proc.data
+    bu_subsidy_proc = bu_subsidy_processor.BUSubsidyProcessor(
+        "", invoice_month, new_pi_credit_proc.data.copy(), args.BU_subsidy_amount
+    )
+    bu_subsidy_proc.process()
+
+    processed_data = bu_subsidy_proc.data
 
     ### Initialize invoices
 
@@ -280,7 +286,6 @@ def main():
         name=args.BU_invoice_file,
         invoice_month=invoice_month,
         data=processed_data.copy(),
-        subsidy_amount=args.BU_subsidy_amount,
     )
 
     pi_inv = pi_specific_invoice.PIInvoice(
