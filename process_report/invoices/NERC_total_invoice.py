@@ -51,9 +51,9 @@ class NERCTotalInvoice(invoice.Invoice):
         return f"Invoices/{self.invoice_month}/Archive/NERC-{self.invoice_month}-Total-Invoice {util.get_iso8601_time()}.csv"
 
     def _prepare_export(self):
-        self.data = self.data[
+        self.export_data = self.data[
             self.data[invoice.IS_BILLABLE_FIELD] & ~self.data[invoice.MISSING_PI_FIELD]
         ]
-        self.data = self.data[
-            self.data[invoice.INSTITUTION_FIELD].isin(self.INCLUDED_INSTITUTIONS)
+        self.export_data = self.export_data[
+            self.export_data[invoice.INSTITUTION_FIELD].isin(self.INCLUDED_INSTITUTIONS)
         ].copy()

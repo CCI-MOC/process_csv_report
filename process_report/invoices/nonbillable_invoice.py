@@ -24,4 +24,4 @@ class NonbillableInvoice(invoice.Invoice):
     ]
 
     def _prepare_export(self):
-        self.data = self.data[~self.data[invoice.IS_BILLABLE_FIELD]]
+        self.export_data = self.data[~self.data[invoice.IS_BILLABLE_FIELD]]

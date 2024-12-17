@@ -42,7 +42,7 @@ class BillableInvoice(invoice.Invoice):
     ]
 
     def _prepare_export(self):
-        self.data = self.data[
+        self.export_data = self.data[
             self.data[invoice.IS_BILLABLE_FIELD] & ~self.data[invoice.MISSING_PI_FIELD]
         ]
         self.updated_old_pi_df = self.updated_old_pi_df.astype(
