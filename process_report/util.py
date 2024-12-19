@@ -34,6 +34,28 @@ def load_institute_list():
     return institute_list
 
 
+def get_institute_mapping(institute_list: list):
+    institute_map = dict()
+    for institute_info in institute_list:
+        for domain in institute_info["domains"]:
+            institute_map[domain] = institute_info["display_name"]
+
+    return institute_map
+
+
+def get_institution_from_pi(institute_map, pi_uname):
+    institution_domain = pi_uname.split("@")[-1]
+    for i in range(institution_domain.count(".") + 1):
+        if institution_name := institute_map.get(institution_domain, ""):
+            break
+        institution_domain = institution_domain[institution_domain.find(".") + 1 :]
+
+    if institution_name == "":
+        print(f"Warning: PI name {pi_uname} does not match any institution!")
+
+    return institution_name
+
+
 def get_iso8601_time():
     return datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")
 
