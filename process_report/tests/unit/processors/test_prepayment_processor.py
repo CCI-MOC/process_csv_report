@@ -429,3 +429,26 @@ class TestPrepaymentProcessor(TestCase):
             answer_prepay_debits,
             invoice_month,
         )
+
+    def test_get_credit_snapshot(self):
+        invoice_month = "2024-10"
+        test_prepay_credits = self._get_test_prepay_credits(
+            ["2024-10", "2024-10", "2024-10", "2024-09", "2024-09"],
+            ["G1", "G2", "G3", "G1", "G2"],
+            [0] * 5,
+        )
+        test_group_info_dict = {
+            "G1": {"MGHPCC Managed": True},
+            "G2": {"MGHPCC Managed": False},
+            "G3": {"MGHPCC Managed": True},
+        }
+        answer_credits_snapshot = test_prepay_credits.iloc[[0, 2]]
+
+        new_prepayment_proc = test_utils.new_prepayment_processor(
+            invoice_month=invoice_month
+        )
+        new_prepayment_proc.prepay_credits = test_prepay_credits
+        new_prepayment_proc.group_info_dict = test_group_info_dict
+        output_snapshot = new_prepayment_proc._get_prepay_credits_snapshot()
+
+        self.assertTrue(answer_credits_snapshot.equals(output_snapshot))
