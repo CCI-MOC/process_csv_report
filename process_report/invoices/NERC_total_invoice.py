@@ -12,12 +12,6 @@ class NERCTotalInvoice(invoice.Invoice):
     - NewPICreditProcessor
     """
 
-    INCLUDED_INSTITUTIONS = [
-        "Harvard University",
-        "Boston University",
-        "University of Rhode Island",
-    ]
-
     export_columns_list = [
         invoice.INVOICE_DATE_FIELD,
         invoice.PROJECT_FIELD,
@@ -59,10 +53,16 @@ class NERCTotalInvoice(invoice.Invoice):
             if data:
                 return str.lower(data)
 
+        included_institutions = list()
+        institute_list = util.load_institute_list()
+        for institute_info in institute_list:
+            if institute_info.get("include_in_nerc_total_invoice"):
+                included_institutions.append(institute_info["display_name"])
+
         self.export_data = self.data[
             self.data[invoice.IS_BILLABLE_FIELD] & ~self.data[invoice.MISSING_PI_FIELD]
         ]
         self.export_data = self.export_data[
-            self.export_data[invoice.INSTITUTION_FIELD].isin(self.INCLUDED_INSTITUTIONS)
+            self.export_data[invoice.INSTITUTION_FIELD].isin(included_institutions)
             | (self.export_data[invoice.GROUP_MANAGED_FIELD].apply(_lower_col) == "yes")
-        ]
+        ].copy()

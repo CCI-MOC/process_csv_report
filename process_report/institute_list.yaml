@@ -6,12 +6,14 @@
     domains:
     - bu.edu
     mghpcc_partnership_start_date: "2013-06"
+    include_in_nerc_total_invoice: True
 -   display_name: Bentley
     domains:
     - bentley.edu
 -   display_name: University of Rhode Island
     domains:
     - uri.edu
+    include_in_nerc_total_invoice: True
 -   display_name: Red Hat
     domains:
     - redhat.com
@@ -38,6 +40,7 @@
     - harvard.edu
     - chemistry.harvard.edu
     mghpcc_partnership_start_date: "2013-06"
+    include_in_NERC_total_invoice: True
 -   display_name: Worcester Polytechnic Institute
     domains:
     - wpi.edu
