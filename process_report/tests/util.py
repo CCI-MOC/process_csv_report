@@ -121,12 +121,18 @@ def new_new_pi_credit_processor(
     invoice_month="0000-00",
     data=None,
     old_pi_filepath="",
+    credit_amount=1000,
     limit_new_pi_credit_to_partners=False,
 ):
     if data is None:
         data = pandas.DataFrame()
     return new_pi_credit_processor.NewPICreditProcessor(
-        name, invoice_month, data, old_pi_filepath, limit_new_pi_credit_to_partners
+        name,
+        invoice_month,
+        data,
+        old_pi_filepath,
+        credit_amount,
+        limit_new_pi_credit_to_partners,
     )
 
 

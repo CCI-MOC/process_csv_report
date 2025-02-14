@@ -6,6 +6,8 @@ import functools
 
 import boto3
 
+from nerc_rates import load_from_url
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -90,3 +92,8 @@ def fetch_s3(s3_filepath):
     invoice_bucket = get_invoice_bucket()
     invoice_bucket.download_file(s3_filepath, local_name)
     return local_name
+
+
+def fetch_nerc_rates(metadata_name, invoice_month):
+    rates_info = load_from_url()
+    return rates_info.get_value_at(metadata_name, invoice_month)

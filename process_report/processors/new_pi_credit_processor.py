@@ -22,11 +22,11 @@ class NewPICreditProcessor(discount_processor.DiscountProcessor):
     """
 
     NEW_PI_CREDIT_CODE = "0002"
-    INITIAL_CREDIT_AMOUNT = 1000
     EXCLUDE_SU_TYPES = ["OpenShift GPUA100SXM4", "OpenStack GPUA100SXM4"]
     IS_DISCOUNT_BY_NERC = True
 
     old_pi_filepath: str
+    initial_credit_amount: int
     limit_new_pi_credit_to_partners: bool = False
 
     @staticmethod
@@ -117,7 +117,7 @@ class NewPICreditProcessor(discount_processor.DiscountProcessor):
             return new_pi_credit_amount
 
         new_pi_credit_amount = get_initial_credit_amount(
-            old_pi_df, self.invoice_month, self.INITIAL_CREDIT_AMOUNT
+            old_pi_df, self.invoice_month, self.initial_credit_amount
         )
         logger.info(
             f"New PI Credit set at {new_pi_credit_amount} for {self.invoice_month}"

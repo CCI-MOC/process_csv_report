@@ -5,7 +5,6 @@ import logging
 
 import pandas
 import pyarrow
-from nerc_rates import load_from_url
 
 from process_report import util
 from process_report.invoices import (
@@ -202,36 +201,34 @@ def main():
         help="Name of csv file listing all prepay group debits. If not provided, defaults to fetching from S3",
     )
     parser.add_argument(
-        "--BU-subsidy-amount",
-        required=True,
+        "--new-pi-credit-amount",
+        required=False,
         type=int,
-        help="Amount of subsidy given to BU PIs",
+        help="Amount of credit given to new PIs. If not provided, defaults to fetching from nerc-rates",
+    )
+    parser.add_argument(
+        "--BU-subsidy-amount",
+        required=False,
+        type=int,
+        help="Amount of subsidy given to BU PIs. If not provided, defaults to fetching from nerc-rates",
     )
     args = parser.parse_args()
 
     invoice_month = args.invoice_month
 
-    if args.fetch_from_s3:
-        csv_files = fetch_s3_invoices(invoice_month)
-    else:
-        csv_files = args.csv_files
-
-    if args.old_pi_file:
-        old_pi_file = args.old_pi_file
-    else:
-        old_pi_file = util.fetch_s3(PI_S3_FILEPATH)
-
-    if args.alias_file:
-        alias_file = args.alias_file
-    else:
-        alias_file = util.fetch_s3(ALIAS_S3_FILEPATH)
+    csv_files = args.csv_files or fetch_s3_invoices(invoice_month)
+    old_pi_file = args.old_pi_file or util.fetch_s3(PI_S3_FILEPATH)
+    alias_file = args.alias_file or util.fetch_s3(ALIAS_S3_FILEPATH)
     alias_dict = load_alias(alias_file)
-
-    if args.prepay_debits:
-        prepay_debits_filepath = args.prepay_debits
-    else:
-        prepay_debits_filepath = util.fetch_s3(PREPAY_DEBITS_S3_FILEPATH)
-
+    prepay_debits_filepath = args.prepay_debits or util.fetch_s3(
+        PREPAY_DEBITS_S3_FILEPATH
+    )
+    new_pi_credit_amount = args.new_pi_credit_amount or int(
+        util.fetch_nerc_rates("New PI Credit", invoice_month)
+    )
+    bu_subsidy_amount = args.BU_subsidy_amount or int(
+        util.fetch_nerc_rates("BU Subsidy", invoice_month)
+    )
     prepay_credits, prepay_projects, prepay_info = load_prepay_csv(
         args.prepay_credits, args.prepay_projects, args.prepay_contacts
     )
@@ -277,14 +274,14 @@ def main():
     )
     validate_billable_pi_proc.process()
 
-    rates_info = load_from_url()
     new_pi_credit_proc = new_pi_credit_processor.NewPICreditProcessor(
         "",
         invoice_month,
         data=validate_billable_pi_proc.data,
         old_pi_filepath=old_pi_file,
+        initial_credit_amount=new_pi_credit_amount,
         limit_new_pi_credit_to_partners=(
-            rates_info.get_value_at(
+            util.fetch_nerc_rates(
                 "Limit New PI Credit to MGHPCC Partners", invoice_month
             )
             == "True",
@@ -293,7 +290,7 @@ def main():
     new_pi_credit_proc.process()
 
     bu_subsidy_proc = bu_subsidy_processor.BUSubsidyProcessor(
-        "", invoice_month, new_pi_credit_proc.data.copy(), args.BU_subsidy_amount
+        "", invoice_month, new_pi_credit_proc.data.copy(), bu_subsidy_amount
     )
     bu_subsidy_proc.process()
 
