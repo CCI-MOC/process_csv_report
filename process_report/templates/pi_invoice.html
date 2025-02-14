@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+  </head>
+
+  <style>
+      table {
+        font-family: arial, sans-serif;
+        border-collapse: collapse;
+        width: 100%;
+      }
+      td, th {
+        border: 1px solid #8d8d8d;
+        text-align: left;
+        padding: 8px;
+      }
+      th {
+        text-align: center;
+      }
+      tr {
+        page-break-inside: avoid;
+      }
+      tr:nth-child(even) {
+        background-color: #dddddd;
+      }
+      tr:last-child {
+        background-color: #dddddd;
+        font-weight: bold;
+      }
+  </style>
+
+  <body>
+    <table>
+      <tr>
+          {% for col in data.columns %}
+            <th>{{col}}</th>
+          {% endfor %}
+      </tr>
+
+      {% for i, row in data.iterrows() %}
+        <tr>
+          {% for field in row %}
+            {% if i == data.index[-1] %}
+              {% if field %}
+                <th>{{field}}</th>
+              {% else %}
+                <td style="border-width: 0;"></td>
+              {% endif %}
+            {% else %}
+              <td>{{field}}</td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </table>
+  </body>
+
+  <script>
+    // To ensure the HTML invoice table always fit the page when
+    // printed to PDF, the width of the page is assigned to be
+    // the width of the table
+
+    var table_width = document.getElementsByTagName('table')[0].clientWidth;
+    const style = document.createElement('style');
+    style.innerHTML = `
+        @page {
+          size: ${table_width}px 1200px;
+        }
+    `;
+    document.head.appendChild(style);
+  </script>
+</html>
